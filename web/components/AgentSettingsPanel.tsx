@@ -1,0 +1,308 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+
+type Props = {
+  accessToken: string | null;
+  tenantId: string | null;
+};
+
+type Allowlist = { channels: string[] };
+
+type AgentConfig = {
+  client_id: string;
+  config_id: string;
+  name: string;
+  system_prompt: string | null;
+  allowlist: Allowlist | null;
+  schedules: {
+    slack_history_sync?: { enabled: boolean };
+    recurring_report?: {
+      enabled: boolean;
+      channel_id: string | null;
+      cadence: string;
+      window_label: string;
+    };
+  };
+  updated_at: string | null;
+};
+
+async function loadConfig(
+  accessToken: string,
+  tenantId: string | null,
+): Promise<AgentConfig> {
+  const res = await fetch(`${getApiBaseUrl()}/agent/config`, {
+    headers: apiAuthHeaders(accessToken, tenantId),
+  });
+  if (!res.ok) {
+    throw new Error((await res.text()) || res.statusText);
+  }
+  return (await res.json()) as AgentConfig;
+}
+
+export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
+  const [data, setData] = useState<AgentConfig | null | undefined>(undefined);
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [channelsText, setChannelsText] = useState("");
+  const [syncEnabled, setSyncEnabled] = useState(true);
+  const [reportEnabled, setReportEnabled] = useState(false);
+  const [reportChannel, setReportChannel] = useState("");
+  const [cadence, setCadence] = useState("weekly");
+  const [windowLabel, setWindowLabel] = useState("last 7 days");
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!accessToken) {
+      setData(null);
+      return;
+    }
+    setError(null);
+    const cfg = await loadConfig(accessToken, tenantId);
+    setData(cfg);
+    setName(cfg.name || "");
+    setPrompt(cfg.system_prompt || "");
+    setChannelsText((cfg.allowlist?.channels || []).join("\n"));
+    setSyncEnabled(cfg.schedules?.slack_history_sync?.enabled ?? true);
+    const report = cfg.schedules?.recurring_report;
+    setReportEnabled(report?.enabled ?? false);
+    setReportChannel(report?.channel_id || "");
+    setCadence(report?.cadence || "weekly");
+    setWindowLabel(report?.window_label || "last 7 days");
+  }, [accessToken, tenantId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(undefined);
+    refresh()
+      .catch((err) => {
+        if (!cancelled) {
+          setData(null);
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
+
+  async function onSaveIdentity(e: FormEvent) {
+    e.preventDefault();
+    if (!accessToken) return;
+    setPending(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const channels = channelsText
+        .split(/[\n,]+/)
+        .map((c) => c.trim())
+        .filter(Boolean);
+      const res = await fetch(`${getApiBaseUrl()}/agent/config`, {
+        method: "PATCH",
+        headers: {
+          ...apiAuthHeaders(accessToken, tenantId),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          system_prompt: prompt,
+          allowlist: { channels },
+        }),
+      });
+      if (!res.ok) {
+        throw new Error((await res.text()) || res.statusText);
+      }
+      setSaved("Agent details saved.");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function onSaveSchedules(e: FormEvent) {
+    e.preventDefault();
+    if (!accessToken) return;
+    setPending(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const headers = {
+        ...apiAuthHeaders(accessToken, tenantId),
+        "Content-Type": "application/json",
+      };
+      const syncRes = await fetch(
+        `${getApiBaseUrl()}/jobs/slack-history-sync/schedule`,
+        {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ enabled: syncEnabled }),
+        },
+      );
+      if (!syncRes.ok) {
+        throw new Error((await syncRes.text()) || syncRes.statusText);
+      }
+      const reportBody: Record<string, unknown> = {
+        enabled: reportEnabled,
+        cadence,
+        window_label: windowLabel,
+      };
+      if (reportChannel.trim()) {
+        reportBody.channel_id = reportChannel.trim();
+      } else {
+        reportBody.clear_channel = true;
+      }
+      const reportRes = await fetch(
+        `${getApiBaseUrl()}/jobs/recurring-report/schedule`,
+        {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(reportBody),
+        },
+      );
+      if (!reportRes.ok) {
+        throw new Error((await reportRes.text()) || reportRes.statusText);
+      }
+      setSaved("Schedules saved.");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (!accessToken) {
+    return (
+      <p style={{ color: "#b00020" }} role="status">
+        API JWT missing. Start FastAPI, seed demo users, then re-login.
+      </p>
+    );
+  }
+
+  if (data === undefined) {
+    return <p>Loading agent settings…</p>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      {error ? (
+        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+          {error}
+        </p>
+      ) : null}
+      {saved ? (
+        <p style={{ margin: 0, color: "#0b6e4f" }} role="status">
+          {saved}
+        </p>
+      ) : null}
+
+      <form
+        onSubmit={onSaveIdentity}
+        style={{ display: "grid", gap: "0.75rem", maxWidth: 560 }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Identity &amp; prompt</h2>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span>Agent name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            style={{ padding: "0.5rem" }}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span>System prompt (org overlay)</span>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={6}
+            placeholder="Optional instructions prepended to workflow prompts"
+            style={{ padding: "0.5rem", fontFamily: "inherit" }}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span>Channel allowlist (one Slack channel id per line)</span>
+          <textarea
+            value={channelsText}
+            onChange={(e) => setChannelsText(e.target.value)}
+            rows={4}
+            placeholder={"C01234567\nC08999999"}
+            style={{ padding: "0.5rem", fontFamily: "ui-monospace, monospace" }}
+          />
+        </label>
+        <p style={{ margin: 0, color: "#555", fontSize: "0.85rem" }}>
+          Empty allowlist = no channel restriction stored. Enforcement in Slack
+          reply path can tighten later; settings are tenant-scoped today.
+        </p>
+        <button type="submit" disabled={pending} style={{ width: "fit-content" }}>
+          {pending ? "Saving…" : "Save agent details"}
+        </button>
+      </form>
+
+      <form
+        onSubmit={onSaveSchedules}
+        style={{ display: "grid", gap: "0.75rem", maxWidth: 560 }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Jobs &amp; schedules</h2>
+        <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={syncEnabled}
+            onChange={(e) => setSyncEnabled(e.target.checked)}
+          />
+          Enable hourly Slack history sync (Beat)
+        </label>
+        <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={reportEnabled}
+            onChange={(e) => setReportEnabled(e.target.checked)}
+          />
+          Enable recurring report job
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span>Report channel id</span>
+          <input
+            value={reportChannel}
+            onChange={(e) => setReportChannel(e.target.value)}
+            placeholder="C0REPORT"
+            style={{ padding: "0.5rem", fontFamily: "ui-monospace, monospace" }}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span>Cadence</span>
+          <select
+            value={cadence}
+            onChange={(e) => setCadence(e.target.value)}
+            style={{ padding: "0.5rem" }}
+          >
+            <option value="weekly">weekly</option>
+            <option value="daily">daily</option>
+          </select>
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span>Window label</span>
+          <input
+            value={windowLabel}
+            onChange={(e) => setWindowLabel(e.target.value)}
+            style={{ padding: "0.5rem" }}
+          />
+        </label>
+        <button type="submit" disabled={pending} style={{ width: "fit-content" }}>
+          {pending ? "Saving…" : "Save schedules"}
+        </button>
+      </form>
+
+      {data?.updated_at ? (
+        <p style={{ margin: 0, color: "#666", fontSize: "0.85rem" }}>
+          Config updated at {data.updated_at}
+        </p>
+      ) : null}
+    </div>
+  );
+}

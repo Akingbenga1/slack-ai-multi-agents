@@ -1,0 +1,23 @@
+{
+  "channel": "C_KNOWLEDGE",
+  "messages": [
+    {
+      "type": "message",
+      "user": "U1",
+      "text": "Sprint ten sample dump about onboarding checklist for new hires",
+      "ts": "1710000000.000100"
+    },
+    {
+      "type": "message",
+      "user": "U2",
+      "text": "We store knowledge in Qdrant with strict tenant isolation filters",
+      "ts": "1710000001.000200"
+    },
+    {
+      "type": "message",
+      "user": "U1",
+      "text": "Ask the agent about Q4 refund policy before escalating to finance",
+      "ts": "1710000002.000300"
+    }
+  ]
+}
