@@ -1,8 +1,6 @@
-"""API tests for recurring report schedule (Task 17.2)."""
+"""API tests for recurring report schedule (Task 17.2 / 28.4)."""
 
 from __future__ import annotations
-
-from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,70 +10,24 @@ from api.app.db.session import get_db
 from api.app.main import app
 from api.app.membership import DEMO_ADMIN_ID, DEMO_TENANT_ID
 from api.app.settings import Settings, get_settings
-
-
-class _ReportScheduleStore:
-    def __init__(self):
-        self.by_tenant: dict[UUID, dict] = {}
-
-    def get(self, _db, tenant_id: UUID) -> dict:
-        return dict(
-            self.by_tenant.get(
-                tenant_id,
-                {
-                    "enabled": False,
-                    "channel_id": None,
-                    "cadence": "weekly",
-                    "window_label": "last 7 days",
-                },
-            )
-        )
-
-    def set(
-        self,
-        _db,
-        *,
-        tenant_id: UUID,
-        enabled: bool | None = None,
-        channel_id: str | None = None,
-        cadence: str | None = None,
-        window_label: str | None = None,
-        clear_channel: bool = False,
-    ):
-        cur = self.get(_db, tenant_id)
-        if enabled is not None:
-            cur["enabled"] = bool(enabled)
-        if clear_channel:
-            cur["channel_id"] = None
-        elif channel_id is not None:
-            cur["channel_id"] = channel_id.strip() or None
-        if cadence is not None:
-            cur["cadence"] = cadence
-            if window_label is None:
-                cur["window_label"] = (
-                    "last 24 hours" if cadence == "daily" else "last 7 days"
-                )
-        if window_label is not None:
-            cur["window_label"] = window_label
-        self.by_tenant[tenant_id] = cur
-        return object()
+from tests.schedules.helpers import MemorySchedules
 
 
 @pytest.fixture
-def store() -> _ReportScheduleStore:
-    return _ReportScheduleStore()
+def schedules() -> MemorySchedules:
+    return MemorySchedules()
 
 
 @pytest.fixture
-def client(store: _ReportScheduleStore, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(schedules: MemorySchedules, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     settings = Settings(jwt_secret="test-secret-at-least-32-chars-long!")
     monkeypatch.setattr(
         "api.app.jobs.routes.get_recurring_report_schedule",
-        store.get,
+        schedules.get_recurring_report_schedule,
     )
     monkeypatch.setattr(
         "api.app.jobs.routes.set_recurring_report_schedule",
-        store.set,
+        schedules.set_recurring_report_schedule,
     )
 
     def _fake_db():
@@ -119,7 +71,7 @@ def test_schedule_get_defaults(client: TestClient):
 
 
 def test_schedule_patch_channel_cadence_enable(
-    client: TestClient, store: _ReportScheduleStore
+    client: TestClient, schedules: MemorySchedules
 ):
     headers = {"Authorization": f"Bearer {_token()}"}
     res = client.patch(
@@ -137,7 +89,10 @@ def test_schedule_patch_channel_cadence_enable(
     assert body["channel_id"] == "C_REPORT"
     assert body["cadence"] == "daily"
     assert body["window_label"] == "last 24 hours"
-    assert store.by_tenant[DEMO_TENANT_ID]["channel_id"] == "C_REPORT"
+    assert (
+        schedules.get_recurring_report_schedule(None, DEMO_TENANT_ID)["channel_id"]
+        == "C_REPORT"
+    )
 
     res = client.patch(
         "/jobs/recurring-report/schedule",
@@ -161,7 +116,7 @@ def test_schedule_rejects_bad_cadence(client: TestClient):
 
 
 def test_force_enqueue(
-    client: TestClient, store: _ReportScheduleStore, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, schedules: MemorySchedules, monkeypatch: pytest.MonkeyPatch
 ):
     class _FakeAsync:
         id = "report-task-1"
@@ -178,7 +133,7 @@ def test_force_enqueue(
         "api.app.jobs.routes.require_entitlement",
         lambda *_a, **_k: None,
     )
-    store.set(
+    schedules.set_recurring_report_schedule(
         None,
         tenant_id=DEMO_TENANT_ID,
         enabled=True,

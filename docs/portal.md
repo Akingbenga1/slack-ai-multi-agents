@@ -19,8 +19,9 @@ Next.js self-serve surfaces for org admins (`admin@example.com` / `admin123`).
 | UI | API |
 | -- | --- |
 | Agent details | `GET` / `PATCH /agent/config` |
-| Slack sync schedule | `GET` / `PATCH /jobs/slack-history-sync/schedule` |
-| Recurring report schedule | `GET` / `PATCH /jobs/recurring-report/schedule` |
+| Schedules (sync + report) | `GET` / `PATCH /agent/schedules` |
+| Slack sync schedule (legacy) | `GET` / `PATCH /jobs/slack-history-sync/schedule` |
+| Recurring report schedule (legacy) | `GET` / `PATCH /jobs/recurring-report/schedule` |
 | Upload | `POST /uploads` |
 | Ingest status | `GET /uploads/jobs`, `GET /uploads/status/{upload_id}` |
 | Live sync | `GET /jobs/slack-history-sync/status`, `POST /jobs/slack-history-sync` |

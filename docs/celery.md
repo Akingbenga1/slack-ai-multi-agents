@@ -45,6 +45,16 @@ Tenant isolation on jobs is via **`client_id` headers** (and Postgres `jobs.tena
 
 Heartbeat writes a row to Postgres `jobs` (`kind=heartbeat`) and logs with `client_id=…`.
 
+## Job lifecycle Template Method (Sprint 29)
+
+Tenant Celery tasks (`heartbeat`, `ingest_upload`, `slack_history_sync`, `recurring_report`) share **`worker/tenant_job.py`**:
+
+- `@tenant_job(kind=…, usage_event=…)` / `run_tenant_job` — resolve tenant → session → create/running → domain body → succeed + usage (or fail + optional fail usage)
+- `run_dispatch` — thin Beat loops (due list → enqueue)
+- `build_beat_schedule(settings)` in `worker/celery_app.py` — intervals from Settings (factory; import still uses `get_settings()` once)
+
+Domain bodies only call `ingest_upload` / `sync_slack_history` / `post_recurring_report`. Shared TEI batch + Qdrant upsert for knowledge ingest lives in `api.app.ingest.chunks_ingest.ingest_chunks` (Slack message vs document supply `point_id_fn` / `payload_fn`).
+
 ## Upload ingest (Sprint 8)
 
 Task name: `worker.ingest_upload` (`kind=ingest_upload` in `jobs`).
@@ -83,9 +93,14 @@ curl -s -X POST http://localhost:8000/jobs/slack-history-sync \
   -H 'Content-Type: application/json' \
   -d '{}'
 
-# Read / toggle Beat enable for the tenant
-curl -s http://localhost:8000/jobs/slack-history-sync/schedule \
+# Read / toggle Beat enable for the tenant (preferred unified API)
+curl -s http://localhost:8000/agent/schedules \
   -H "Authorization: Bearer $TOKEN"
+curl -s -X PATCH http://localhost:8000/agent/schedules \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"slack_history_sync":{"enabled":false}}'
+# Legacy adapters still work:
 curl -s -X PATCH http://localhost:8000/jobs/slack-history-sync/schedule \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
@@ -115,16 +130,23 @@ Stored on `agent_configs.schedules.recurring_report`:
 | `window_label` | derived | Digest window (`last 24 hours` / `last 7 days`) |
 
 ```bash
-# Read / update schedule
-curl -s http://localhost:8000/jobs/recurring-report/schedule \
+# Preferred: unified agent schedules API
+curl -s http://localhost:8000/agent/schedules \
   -H "Authorization: Bearer $TOKEN"
+curl -s -X PATCH http://localhost:8000/agent/schedules \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"recurring_report":{"enabled":true,"channel_id":"C01234567","cadence":"weekly"}}'
+# Legacy adapter:
 curl -s -X PATCH http://localhost:8000/jobs/recurring-report/schedule \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"enabled":true,"channel_id":"C01234567","cadence":"weekly"}'
 ```
 
-Helpers: `api.app.reports.schedule` (`get_recurring_report_schedule`, `set_recurring_report_schedule`, `list_tenants_for_scheduled_reports`). Beat task + channel post: Task 17.3.
+Helpers: `api.app.schedules` (`ScheduleStore` + `ScheduleKindStrategy`); facades in `api.app.reports.schedule` / `api.app.slack.schedule`. Beat dispatchers call `list_due_for_kind` / `list_due_recurring_reports`.
+
+**Add a schedule kind:** implement `ScheduleKindStrategy` (defaults / normalize / apply_patch / is_due) → register on `SCHEDULE_KIND_STRATEGIES` in `api/app/schedules/kinds.py` → optional thin facade under `slack/` or `reports/`. Portal + Beat already share `GET`/`PATCH /agent/schedules` and the store. Shared test blocks: `tests/schedules/helpers.py` (`sync_block` / `report_block` / `FakeScheduleDB` / `MemorySchedules`).
 
 ### Force post + Beat (Task 17.3)
 

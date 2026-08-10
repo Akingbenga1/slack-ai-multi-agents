@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
-from api.app.qdrant.tenant import require_client_id
-from api.app.retrieval.types import KnowledgeCitation, KnowledgeSearchResult
-from mcp_server.serialize import citation_to_dict, search_result_to_dict
-from mcp_server.tools.search import search_knowledge_tool
-
-SearchToolFn = Callable[..., dict[str, Any]]
+from api.app.retrieval.types import KnowledgeCitation
+from mcp_server.tools.grounded import (
+    SearchToolFn,
+    excerpt,
+    run_grounded_draft,
+)
 
 
 def draft_meeting_agenda(
@@ -28,64 +27,33 @@ def draft_meeting_agenda(
     Deterministic (no LLM): numbered items + decision points from evidence.
     Agent compose (Sprint 16.3) may polish on Sonnet.
     """
-    cid = require_client_id(client_id)
     subject = (topic or "").strip()
     if not subject:
         raise ValueError("topic must be non-empty")
 
-    search = search_tool_fn or search_knowledge_tool
-    raw = search(
-        client_id=cid,
+    def outline_fn(citations: list[KnowledgeCitation]) -> dict[str, Any]:
+        items = _agenda_items(subject, citations)
+        return {
+            "topic": subject,
+            "title": f"Meeting agenda: {subject}",
+            "items": items,
+            "markdown": _markdown_agenda(subject, items, citations),
+        }
+
+    return run_grounded_draft(
+        client_id=client_id,
         query=subject,
+        outline_fn=outline_fn,
         limit=limit,
         kind=kind,
         channel=channel,
-    )
-    hits = raw.get("hits") or []
-    citations = [_hit_as_citation(h) for h in hits if isinstance(h, dict)]
-
-    items = _agenda_items(subject, citations)
-    markdown = _markdown_agenda(subject, items, citations)
-
-    return {
-        "client_id": cid,
-        "topic": subject,
-        "title": f"Meeting agenda: {subject}",
-        "items": items,
-        "markdown": markdown,
-        "citations": [citation_to_dict(c) for c in citations],
-        "retrieval": raw
-        if "query" in raw
-        else search_result_to_dict(
-            KnowledgeSearchResult(
-                client_id=cid, query=subject, hits=citations, limit=limit
-            )
-        ),
-        "hedged": len(citations) == 0,
-        "note": (
+        search_tool_fn=search_tool_fn,
+        empty_note=(
             "Insufficient tenant evidence — agenda is a placeholder skeleton."
-            if not citations
-            else "Draft from retrieved evidence only; review before sharing."
         ),
-    }
-
-
-def _hit_as_citation(h: dict[str, Any]) -> KnowledgeCitation:
-    return KnowledgeCitation(
-        point_id=str(h.get("point_id") or ""),
-        score=float(h.get("score") or 0.0),
-        text=str(h.get("text") or ""),
-        kind=str(h.get("kind") or "unknown"),
-        client_id=str(h.get("client_id") or ""),
-        channel=h.get("channel"),
-        ts=h.get("ts"),
-        user=h.get("user"),
-        thread_ts=h.get("thread_ts"),
-        filename=h.get("filename"),
-        locator=h.get("locator"),
-        title=h.get("title"),
-        source_format=h.get("source_format"),
-        chunk_index=h.get("chunk_index"),
+        evidence_note=(
+            "Draft from retrieved evidence only; review before sharing."
+        ),
     )
 
 
@@ -119,13 +87,11 @@ def _agenda_items(
         }
     ]
     for i, c in enumerate(citations, start=1):
-        excerpt = _excerpt(c.text)
-        owner = c.user
         items.append(
             {
                 "title": f"Topic {i}",
-                "detail": f"{excerpt} _(source: {c.short_label()})_",
-                "owner": owner,
+                "detail": f"{excerpt(c.text)} _(source: {c.short_label()})_",
+                "owner": c.user,
             }
         )
     items.append(
@@ -165,13 +131,6 @@ def _markdown_agenda(
             lines.append(f"- {c.short_label()} (score={c.score:.3f})")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
-
-
-def _excerpt(text: str, max_len: int = 160) -> str:
-    cleaned = " ".join((text or "").split())
-    if len(cleaned) <= max_len:
-        return cleaned
-    return cleaned[: max_len - 1].rstrip() + "…"
 
 
 __all__ = ["draft_meeting_agenda"]

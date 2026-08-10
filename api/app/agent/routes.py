@@ -14,9 +14,11 @@ from api.app.agent.config_store import (
     update_agent_settings,
 )
 from api.app.auth.deps import require_tenant_access
+from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.session import get_db
 from api.app.logging_config import get_logger
+from api.app.schedules import patch_schedules, read_all_kinds
 from api.app.tenant import get_client_id
 
 logger = get_logger("api.agent.routes")
@@ -79,20 +81,33 @@ class AgentConfigUpdate(BaseModel):
     clear_allowlist: bool = False
 
 
+class SlackHistorySyncScheduleBody(BaseModel):
+    enabled: Optional[bool] = None
+
+
+class RecurringReportScheduleBody(BaseModel):
+    enabled: Optional[bool] = None
+    channel_id: Optional[str] = None
+    clear_channel: bool = False
+    cadence: Optional[str] = Field(default=None, description="daily or weekly")
+    window_label: Optional[str] = None
+
+
+class AgentSchedulesUpdate(BaseModel):
+    slack_history_sync: Optional[SlackHistorySyncScheduleBody] = None
+    recurring_report: Optional[RecurringReportScheduleBody] = None
+
+
+class AgentSchedulesResponse(BaseModel):
+    client_id: str
+    schedules: dict[str, Any]
+
+
 def _require_client_uuid(principal: AuthPrincipal) -> UUID:
-    client_id = get_client_id() or principal.tenant_id
-    if not client_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant context required",
-        )
-    try:
-        return UUID(str(client_id))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
-        ) from exc
+    return resolve_tenant_uuid_for_principal(
+        principal,
+        missing_detail="tenant context required",
+    )
 
 
 def _to_config_response(payload: dict[str, Any]) -> AgentConfigResponse:
@@ -144,6 +159,56 @@ def patch_agent_config(
             detail=str(exc),
         ) from exc
     return _to_config_response(agent_settings_dict(db, tid))
+
+
+@router.get("/schedules", response_model=AgentSchedulesResponse)
+def get_agent_schedules(
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentSchedulesResponse:
+    """Read Strategy-normalized schedule blocks for the tenant."""
+    tid = _require_client_uuid(principal)
+    return AgentSchedulesResponse(
+        client_id=str(tid),
+        schedules=read_all_kinds(db, tid),
+    )
+
+
+@router.patch("/schedules", response_model=AgentSchedulesResponse)
+def patch_agent_schedules(
+    body: AgentSchedulesUpdate,
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AgentSchedulesResponse:
+    """
+    Unified schedules write path (portal + Beat share Strategy + store).
+
+    Accepts one or both kind patches in a single request.
+    """
+    tid = _require_client_uuid(principal)
+    sync_patch = (
+        body.slack_history_sync.model_dump(exclude_unset=True)
+        if body.slack_history_sync is not None
+        else None
+    )
+    report_patch = (
+        body.recurring_report.model_dump(exclude_unset=True)
+        if body.recurring_report is not None
+        else None
+    )
+    try:
+        schedules = patch_schedules(
+            db,
+            tenant_id=tid,
+            slack_history_sync=sync_patch,
+            recurring_report=report_patch,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return AgentSchedulesResponse(client_id=str(tid), schedules=schedules)
 
 
 @router.post("/dry-run", response_model=DryRunResponse)

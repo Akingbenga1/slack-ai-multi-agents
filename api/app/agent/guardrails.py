@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from api.app.tenant import ClientIdRequired
+from api.app.tenant import require_client_id as _require_client_id
+
 HEDGE_MESSAGE = (
     "I don't have enough information in your organisation's knowledge base "
     "to answer that confidently. Try rephrasing, or sync Slack history / "
@@ -11,18 +14,20 @@ HEDGE_MESSAGE = (
 )
 
 
-class TenantContextRequired(ValueError):
+class TenantContextRequired(ClientIdRequired):
     """Raised when agent state is missing a usable client_id."""
 
 
 def require_tenant_client_id(client_id: str | None, *, where: str = "agent") -> str:
     """Fail-closed: every agent node must carry a non-empty tenant id."""
-    value = (client_id or "").strip()
-    if not value:
+    try:
+        return _require_client_id(client_id, where=where)
+    except ClientIdRequired as exc:
+        if isinstance(exc, TenantContextRequired):
+            raise
         raise TenantContextRequired(
             f"client_id is required for {where} (tenant filter must never be dropped)"
-        )
-    return value
+        ) from exc
 
 
 def filter_chunks_for_tenant(

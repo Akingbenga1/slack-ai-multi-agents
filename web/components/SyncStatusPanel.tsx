@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -29,13 +29,11 @@ export function SyncStatusPanel({ accessToken, tenantId }: Props) {
       setData(null);
       return;
     }
-    const res = await fetch(`${getApiBaseUrl()}/jobs/slack-history-sync/status`, {
-      headers: apiAuthHeaders(accessToken, tenantId),
-    });
-    if (!res.ok) {
-      throw new Error((await res.text()) || res.statusText);
-    }
-    setData((await res.json()) as SyncStatus);
+    const status = await apiClient.get<SyncStatus>(
+      "/jobs/slack-history-sync/status",
+      { accessToken, clientId: tenantId },
+    );
+    setData(status);
   }, [accessToken, tenantId]);
 
   useEffect(() => {
@@ -59,19 +57,15 @@ export function SyncStatusPanel({ accessToken, tenantId }: Props) {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/jobs/slack-history-sync`, {
-        method: "POST",
-        headers: {
-          ...apiAuthHeaders(accessToken, tenantId),
-          "Content-Type": "application/json",
+      const body = await apiClient.post<{ task_id?: string }>(
+        "/jobs/slack-history-sync",
+        {
+          accessToken,
+          clientId: tenantId,
+          json: {},
         },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        throw new Error((await res.text()) || res.statusText);
-      }
-      const body = (await res.json()) as { task_id?: string };
-      setMessage(`Sync enqueued (task ${body.task_id || "ok"}).`);
+      );
+      setMessage(`Sync enqueued (task ${body?.task_id || "ok"}).`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

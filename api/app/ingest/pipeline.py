@@ -7,12 +7,18 @@ from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
 from api.app.ingest.chunk import MessageChunk, chunk_messages
+from api.app.ingest.chunks_ingest import DEFAULT_EMBED_BATCH, ingest_chunks
 from api.app.ingest.schema import NormalizedMessage
-from api.app.qdrant.vectors import upsert_vectors
-from api.app.settings import Settings, get_settings
+from api.app.settings import Settings
 from api.app.tei.client import TeiClient
 
-DEFAULT_EMBED_BATCH = 32
+__all__ = [
+    "DEFAULT_EMBED_BATCH",
+    "IngestResult",
+    "chunk_payload",
+    "ingest_messages",
+    "point_id_for_chunk",
+]
 
 
 def point_id_for_chunk(client_id: str, chunk: MessageChunk) -> str:
@@ -70,29 +76,20 @@ def ingest_messages(
 
     Requires a non-empty ``client_id`` (fail-closed at Qdrant helpers).
     """
-    settings = settings or get_settings()
-    tei = tei or TeiClient(settings)
     msg_list = list(messages)
     chunks = chunk_messages(msg_list, max_chars=max_chars, overlap=overlap)
     if not chunks:
         return IngestResult(client_id=client_id, message_count=0, chunk_count=0)
 
-    point_ids: list[str] = []
-    batch_size = max(1, embed_batch_size)
-    for start in range(0, len(chunks), batch_size):
-        batch = chunks[start : start + batch_size]
-        vectors = tei.embed([c.text for c in batch])
-        ids = [point_id_for_chunk(client_id, c) for c in batch]
-        payloads = [chunk_payload(c) for c in batch]
-        upsert_vectors(
-            client_id=client_id,
-            vectors=vectors,
-            payloads=payloads,
-            ids=ids,
-            settings=settings,
-        )
-        point_ids.extend(ids)
-
+    point_ids = ingest_chunks(
+        client_id=client_id,
+        chunks=chunks,
+        point_id_fn=point_id_for_chunk,
+        payload_fn=chunk_payload,
+        settings=settings,
+        tei=tei,
+        embed_batch_size=embed_batch_size,
+    )
     return IngestResult(
         client_id=client_id,
         message_count=len(msg_list),

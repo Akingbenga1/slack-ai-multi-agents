@@ -1,4 +1,8 @@
-"""MCP client — LangGraph tool node talks to the bundled stdio MCP server."""
+"""MCP client Adapter — LangGraph tools talk to bundled MCP tools.
+
+Transport (Sprint 27.3): one ``invoke_mcp`` Adapter. Prefer in-process
+FastMCP for API/worker; stdio remains for external clients / opt-in.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +28,9 @@ logger = get_logger("api.agent.mcp_client")
 McpCallTool = Callable[[str, dict[str, Any]], Awaitable[Any]]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Cached FastMCP for in-process transport (one process-local Adapter instance).
+_in_process_mcp: Any | None = None
 
 
 def mcp_server_params(
@@ -54,6 +61,21 @@ def mcp_server_params(
     )
 
 
+def _mcp_transport(settings: Settings | None) -> str:
+    settings = settings or get_settings()
+    raw = (getattr(settings, "agent_mcp_transport", None) or "in_process").strip()
+    return raw.lower().replace("-", "_")
+
+
+def _in_process_server() -> Any:
+    global _in_process_mcp
+    if _in_process_mcp is None:
+        from mcp_server.server import create_mcp
+
+        _in_process_mcp = create_mcp()
+    return _in_process_mcp
+
+
 async def call_mcp_tool_async(
     name: str,
     arguments: dict[str, Any],
@@ -62,9 +84,15 @@ async def call_mcp_tool_async(
     server: StdioServerParameters | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> CallToolResult | Any:
-    """Call one MCP tool (stdio session, or injectable ``call_tool`` for tests)."""
+    """Call one MCP tool (in-process, stdio, or injectable ``call_tool``)."""
     if call_tool is not None:
         return await call_tool(name, arguments)
+
+    settings = settings or get_settings()
+    transport = _mcp_transport(settings)
+    if transport in ("in_process", "inprocess", "local"):
+        app = _in_process_server()
+        return await app.call_tool(name, arguments)
 
     params = server or mcp_server_params(settings)
     async with stdio_client(params) as (read, write):
@@ -98,6 +126,13 @@ def tool_result_payload(result: Any) -> dict[str, Any]:
     """Extract structured JSON from a CallToolResult (or pass-through dict)."""
     if isinstance(result, dict):
         return result
+    # FastMCP in-process: (content_blocks, structured_dict)
+    if (
+        isinstance(result, tuple)
+        and len(result) == 2
+        and isinstance(result[1], dict)
+    ):
+        return result[1]
     if getattr(result, "isError", False):
         text = _content_text(result)
         raise RuntimeError(f"MCP tool error: {text or result!r}")
@@ -119,6 +154,31 @@ def _content_text(result: Any) -> str:
         if t:
             parts.append(str(t))
     return "\n".join(parts).strip()
+
+
+def invoke_mcp(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    settings: Settings | None = None,
+    call_tool: Optional[McpCallTool] = None,
+    server: StdioServerParameters | None = None,
+) -> dict[str, Any]:
+    """
+    Thin Adapter: call one MCP tool and return its structured payload.
+
+    Tool Strategies / typed helpers should use this (or a thin wrapper) and
+    must not own transport details.
+    """
+    logger.info("mcp_call_tool name=%s", name)
+    raw = call_mcp_tool(
+        name,
+        arguments,
+        settings=settings,
+        server=server,
+        call_tool=call_tool,
+    )
+    return tool_result_payload(raw)
 
 
 def citation_from_mcp_hit(hit: Mapping[str, Any]) -> KnowledgeCitation:
@@ -152,6 +212,11 @@ def knowledge_result_from_mcp(payload: Mapping[str, Any]) -> KnowledgeSearchResu
     )
 
 
+def _optional_args(**kwargs: Any) -> dict[str, Any]:
+    """Drop falsy values so MCP schemas do not get unexpected nulls/empties."""
+    return {k: v for k, v in kwargs.items() if v}
+
+
 def search_knowledge_via_mcp(
     *,
     client_id: str,
@@ -176,26 +241,11 @@ def search_knowledge_via_mcp(
         "client_id": client_id,
         "query": query,
         "limit": int(limit),
+        **_optional_args(kind=kind, channel=channel, filename=filename),
     }
-    if kind:
-        args["kind"] = kind
-    if channel:
-        args["channel"] = channel
-    if filename:
-        args["filename"] = filename
-
-    logger.info(
-        "mcp_call_tool name=search_knowledge client_id=%s limit=%s",
-        client_id,
-        limit,
+    payload = invoke_mcp(
+        "search_knowledge", args, settings=settings, call_tool=call_tool
     )
-    raw = call_mcp_tool(
-        "search_knowledge",
-        args,
-        settings=settings,
-        call_tool=call_tool,
-    )
-    payload = tool_result_payload(raw)
     return knowledge_result_from_mcp(payload)
 
 
@@ -209,32 +259,16 @@ def draft_meeting_brief_via_mcp(
     settings: Settings | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> dict[str, Any]:
-    """
-    Invoke MCP ``draft_meeting_brief``.
-
-    Returns the tool payload (markdown, sections, citations, hedged, …).
-    """
+    """Invoke MCP ``draft_meeting_brief`` (typed helper over ``invoke_mcp``)."""
     args: dict[str, Any] = {
         "client_id": client_id,
         "topic": topic,
         "limit": int(limit),
+        **_optional_args(kind=kind, channel=channel),
     }
-    if kind:
-        args["kind"] = kind
-    if channel:
-        args["channel"] = channel
-
-    logger.info(
-        "mcp_call_tool name=draft_meeting_brief client_id=%s",
-        client_id,
+    return invoke_mcp(
+        "draft_meeting_brief", args, settings=settings, call_tool=call_tool
     )
-    raw = call_mcp_tool(
-        "draft_meeting_brief",
-        args,
-        settings=settings,
-        call_tool=call_tool,
-    )
-    return tool_result_payload(raw)
 
 
 def draft_meeting_agenda_via_mcp(
@@ -247,32 +281,16 @@ def draft_meeting_agenda_via_mcp(
     settings: Settings | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> dict[str, Any]:
-    """
-    Invoke MCP ``draft_meeting_agenda``.
-
-    Returns the tool payload (markdown, items, citations, hedged, …).
-    """
+    """Invoke MCP ``draft_meeting_agenda`` (typed helper over ``invoke_mcp``)."""
     args: dict[str, Any] = {
         "client_id": client_id,
         "topic": topic,
         "limit": int(limit),
+        **_optional_args(kind=kind, channel=channel),
     }
-    if kind:
-        args["kind"] = kind
-    if channel:
-        args["channel"] = channel
-
-    logger.info(
-        "mcp_call_tool name=draft_meeting_agenda client_id=%s",
-        client_id,
+    return invoke_mcp(
+        "draft_meeting_agenda", args, settings=settings, call_tool=call_tool
     )
-    raw = call_mcp_tool(
-        "draft_meeting_agenda",
-        args,
-        settings=settings,
-        call_tool=call_tool,
-    )
-    return tool_result_payload(raw)
 
 
 def draft_meeting_notes_via_mcp(
@@ -285,32 +303,16 @@ def draft_meeting_notes_via_mcp(
     settings: Settings | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> dict[str, Any]:
-    """
-    Invoke MCP ``draft_meeting_notes``.
-
-    Returns the tool payload (markdown, sections, citations, hedged, …).
-    """
+    """Invoke MCP ``draft_meeting_notes`` (typed helper over ``invoke_mcp``)."""
     args: dict[str, Any] = {
         "client_id": client_id,
         "topic": topic,
         "limit": int(limit),
+        **_optional_args(kind=kind, channel=channel),
     }
-    if kind:
-        args["kind"] = kind
-    if channel:
-        args["channel"] = channel
-
-    logger.info(
-        "mcp_call_tool name=draft_meeting_notes client_id=%s",
-        client_id,
+    return invoke_mcp(
+        "draft_meeting_notes", args, settings=settings, call_tool=call_tool
     )
-    raw = call_mcp_tool(
-        "draft_meeting_notes",
-        args,
-        settings=settings,
-        call_tool=call_tool,
-    )
-    return tool_result_payload(raw)
 
 
 def draft_report_via_mcp(
@@ -324,35 +326,16 @@ def draft_report_via_mcp(
     settings: Settings | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> dict[str, Any]:
-    """
-    Invoke MCP ``draft_report``.
-
-    Returns the tool payload (markdown, sections, citations, hedged, …).
-    """
+    """Invoke MCP ``draft_report`` (typed helper over ``invoke_mcp``)."""
     args: dict[str, Any] = {
         "client_id": client_id,
         "window_label": window_label,
         "limit": int(limit),
+        **_optional_args(kind=kind, channel=channel, topic=topic),
     }
-    if kind:
-        args["kind"] = kind
-    if channel:
-        args["channel"] = channel
-    if topic:
-        args["topic"] = topic
-
-    logger.info(
-        "mcp_call_tool name=draft_report client_id=%s window=%s",
-        client_id,
-        window_label,
+    return invoke_mcp(
+        "draft_report", args, settings=settings, call_tool=call_tool
     )
-    raw = call_mcp_tool(
-        "draft_report",
-        args,
-        settings=settings,
-        call_tool=call_tool,
-    )
-    return tool_result_payload(raw)
 
 
 def start_onboarding_via_mcp(
@@ -361,22 +344,13 @@ def start_onboarding_via_mcp(
     settings: Settings | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> dict[str, Any]:
-    """
-    Invoke MCP ``start_onboarding``.
-
-    Returns the stub payload (``configured=false``, ``message``, …).
-    """
-    logger.info(
-        "mcp_call_tool name=start_onboarding client_id=%s",
-        client_id,
-    )
-    raw = call_mcp_tool(
+    """Invoke MCP ``start_onboarding`` (typed helper over ``invoke_mcp``)."""
+    return invoke_mcp(
         "start_onboarding",
         {"client_id": client_id},
         settings=settings,
         call_tool=call_tool,
     )
-    return tool_result_payload(raw)
 
 
 __all__ = [
@@ -388,6 +362,7 @@ __all__ = [
     "draft_meeting_brief_via_mcp",
     "draft_meeting_notes_via_mcp",
     "draft_report_via_mcp",
+    "invoke_mcp",
     "knowledge_result_from_mcp",
     "mcp_server_params",
     "search_knowledge_via_mcp",

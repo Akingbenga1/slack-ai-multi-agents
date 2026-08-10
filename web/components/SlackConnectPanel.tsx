@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -25,13 +25,14 @@ async function fetchConnection(
   accessToken: string,
   tenantId: string | null,
 ): Promise<SlackConnection> {
-  const res = await fetch(`${getApiBaseUrl()}/slack/connection`, {
-    headers: apiAuthHeaders(accessToken, tenantId),
+  const data = await apiClient.get<SlackConnection>("/slack/connection", {
+    accessToken,
+    clientId: tenantId,
   });
-  if (!res.ok) {
-    throw new Error((await res.text()) || res.statusText);
+  if (!data) {
+    throw new Error("Empty slack connection response");
   }
-  return (await res.json()) as SlackConnection;
+  return data;
 }
 
 export function SlackConnectPanel({

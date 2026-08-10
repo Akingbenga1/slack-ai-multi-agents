@@ -2,6 +2,8 @@
 
 Deferred / post-MVP: attach → analyse → PDF deliverable → rename (`J10`, `TM-17`–`TM-19`, `TM-23`).
 
+Classifier + tool + delivery Strategies for these workflows live in the agent registry — see **Workflow registry & Strategies** in [`docs/agent.md`](agent.md). Pattern plan: [`Project-Documents/review.md`](../Project-Documents/review.md).
+
 ## Flow
 
 1. Mention/DM with `files` (or file permalink / `F…` id in text)
@@ -43,11 +45,14 @@ Install URL still: `{PUBLIC_BASE_URL}/slack/install?tenant_id=…`
 
 | Path | Role |
 | ---- | ---- |
-| `api/app/slack/attachments.py` | Detect refs, download, store, parse |
+| `api/app/slack/files/` | Facade: refs / intake / pdf / rename |
+| `api/app/slack/attachments.py` | Shim → `files` (back-compat) |
 | `api/app/slack/pdf_export.py` | Analysis text → PDF bytes |
-| `api/app/slack/file_actions.py` | PDF upload + rename + TM-23 copy |
-| `api/app/slack/client.py` | `files_info`, download, `files_upload`, `files_edit` |
-| `api/app/slack/agent_reply.py` | Wires intake + PDF + rename into mention/DM path |
+| `api/app/slack/file_actions.py` | Shim → `files` PDF/rename helpers |
+| `api/app/slack/client.py` | HTTP Adapter: `files_info`, download, `files_upload`, `files_edit` |
+| `api/app/slack/store.py` | Install/token factories (`client_for_tenant` / `client_for_team`) |
+| `api/app/slack/delivery/` | DeliveryStrategy map (PDF / rename / default post) |
+| `api/app/slack/reply_pipeline.py` | Mention/DM Gate → Intake → RunAgent → Deliver |
 | `mcp_server/tools/rename.py` | MCP `rename_slack_file` |
 
 ## Usage events
@@ -63,7 +68,7 @@ These count toward `jobs_daily` (`JOB_BUDGET_EVENT_TYPES`).
 ## Smoke (offline)
 
 ```bash
-uv run pytest tests/slack/test_attachments.py tests/slack/test_pdf_export.py tests/slack/test_file_rename.py tests/slack/test_sprint23_smoke.py tests/agent/test_file_route.py -q
+uv run pytest tests/slack/test_attachments.py tests/slack/test_pdf_export.py tests/slack/test_file_rename.py tests/slack/test_sprint23_smoke.py tests/slack/test_sprint26_smoke.py tests/agent/test_file_route.py -q
 ```
 
 Live: attach a financial report PDF/CSV in Slack, `@mention` with “produce a PDF of competitor analysis and rename the financial report file to Q3-financial.csv”, confirm PDF + rename confirmation after scopes + reinstall.

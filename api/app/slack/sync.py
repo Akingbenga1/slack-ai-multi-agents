@@ -12,7 +12,8 @@ from api.app.ingest import SourceFormat, normalize_slack_message
 from api.app.ingest.pipeline import IngestResult, ingest_messages
 from api.app.logging_config import get_logger
 from api.app.settings import Settings, get_settings
-from api.app.slack.client import SlackWebClient, slack_client_for_tenant
+from api.app.slack.client import SlackWebClient
+from api.app.slack.store import client_for_tenant as slack_client_for_tenant
 from api.app.slack.watermarks import (
     SOURCE_SLACK_LIVE,
     bounds_from_watermark,

@@ -172,27 +172,22 @@ def test_demo_activate_plan_setting_parsed():
 
 
 def test_beat_lists_respect_entitlements(monkeypatch: pytest.MonkeyPatch):
-    from types import SimpleNamespace
+    from tests.schedules.helpers import FakeScheduleDB, report_block, sync_block
 
     t = uuid4()
-
-    class FakeDB:
-        def scalars(self, _stmt):
-            return SimpleNamespace(all=lambda: [t])
-
-    monkeypatch.setattr(sync_sched, "is_slack_history_sync_enabled", lambda *_a, **_k: True)
-    monkeypatch.setattr(sync_sched, "tenant_has_entitlement", lambda *_a, **_k: False)
-    assert sync_sched.list_tenants_for_scheduled_slack_sync(FakeDB()) == []
-
-    monkeypatch.setattr(
-        report_sched,
-        "get_recurring_report_schedule",
-        lambda *_a, **_k: {
-            "enabled": True,
-            "channel_id": "C1",
-            "cadence": "weekly",
-            "window_label": "last 7 days",
+    db = FakeScheduleDB(install_tenant_ids=[t])
+    db.seed(
+        t,
+        {
+            sync_sched.SCHEDULE_KEY: sync_block(enabled=True),
+            report_sched.SCHEDULE_KEY: report_block(
+                enabled=True, channel_id="C1", cadence="weekly"
+            ),
         },
     )
-    monkeypatch.setattr(report_sched, "tenant_has_entitlement", lambda *_a, **_k: False)
-    assert report_sched.list_tenants_for_scheduled_reports(FakeDB()) == []
+    monkeypatch.setattr(
+        "api.app.schedules.kinds.tenant_has_entitlement",
+        lambda *_a, **_k: False,
+    )
+    assert sync_sched.list_tenants_for_scheduled_slack_sync(db) == []
+    assert report_sched.list_tenants_for_scheduled_reports(db) == []

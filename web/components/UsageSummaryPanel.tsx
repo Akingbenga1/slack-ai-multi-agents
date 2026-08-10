@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -55,16 +55,14 @@ async function fetchSummary(
   tenantId: string | null,
   window: "day" | "month",
 ): Promise<UsageSummary> {
-  const headers = apiAuthHeaders(accessToken, tenantId);
-  const res = await fetch(
-    `${getApiBaseUrl()}/usage/summary?window=${window}`,
-    { headers },
+  const data = await apiClient.get<UsageSummary>(
+    `/usage/summary?window=${window}`,
+    { accessToken, clientId: tenantId },
   );
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || res.statusText);
+  if (!data) {
+    throw new Error("Empty usage summary");
   }
-  return (await res.json()) as UsageSummary;
+  return data;
 }
 
 async function fetchEvents(
@@ -72,16 +70,14 @@ async function fetchEvents(
   tenantId: string | null,
   eventType: string,
 ): Promise<UsageEventRow[]> {
-  const headers = apiAuthHeaders(accessToken, tenantId);
   const q = eventType
     ? `?event_type=${encodeURIComponent(eventType)}&limit=40`
     : "?limit=40";
-  const res = await fetch(`${getApiBaseUrl()}/usage/events${q}`, { headers });
-  if (!res.ok) {
-    throw new Error((await res.text()) || res.statusText);
-  }
-  const body = (await res.json()) as { events: UsageEventRow[] };
-  return body.events;
+  const body = await apiClient.get<{ events: UsageEventRow[] }>(
+    `/usage/events${q}`,
+    { accessToken, clientId: tenantId },
+  );
+  return body?.events || [];
 }
 
 async function fetchJobs(
@@ -89,14 +85,12 @@ async function fetchJobs(
   tenantId: string | null,
   failedOnly: boolean,
 ): Promise<JobLogRow[]> {
-  const headers = apiAuthHeaders(accessToken, tenantId);
   const q = failedOnly ? "?status=failed&limit=40" : "?limit=40";
-  const res = await fetch(`${getApiBaseUrl()}/usage/jobs${q}`, { headers });
-  if (!res.ok) {
-    throw new Error((await res.text()) || res.statusText);
-  }
-  const body = (await res.json()) as { jobs: JobLogRow[] };
-  return body.jobs;
+  const body = await apiClient.get<{ jobs: JobLogRow[] }>(
+    `/usage/jobs${q}`,
+    { accessToken, clientId: tenantId },
+  );
+  return body?.jobs || [];
 }
 
 export function UsageSummaryPanel({ accessToken, tenantId }: Props) {

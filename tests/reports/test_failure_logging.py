@@ -1,4 +1,4 @@
-"""Failure logging for recurring report jobs (Task 17.4)."""
+"""Failure logging for recurring report jobs (Task 17.4 / Sprint 29.2)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from worker import tasks as worker_tasks
+from worker import tenant_job as tenant_job_mod
 from worker.job_meta import KIND_RECURRING_REPORT, STATUS_FAILED
 
 
@@ -26,18 +27,18 @@ def test_recurring_report_failure_marks_job_and_usage(
         def close(self):
             return None
 
-    monkeypatch.setattr(worker_tasks, "session_scope", lambda: FakeDB())
+    monkeypatch.setattr(tenant_job_mod, "session_scope", lambda: FakeDB())
     monkeypatch.setattr(
-        worker_tasks,
-        "_resolve_tenant_id",
+        tenant_job_mod,
+        "resolve_tenant_id",
         lambda _tid=None: tenant_id,
     )
     monkeypatch.setattr(
-        worker_tasks,
+        tenant_job_mod,
         "create_job",
         lambda *_a, **_k: job,
     )
-    monkeypatch.setattr(worker_tasks, "mark_running", lambda *_a, **_k: job)
+    monkeypatch.setattr(tenant_job_mod, "mark_running", lambda *_a, **_k: job)
 
     def fake_failed(_db, _job, err: str):
         failed.append(err)
@@ -45,7 +46,7 @@ def test_recurring_report_failure_marks_job_and_usage(
         job.error = err
         return job
 
-    monkeypatch.setattr(worker_tasks, "mark_failed", fake_failed)
+    monkeypatch.setattr(tenant_job_mod, "mark_failed", fake_failed)
     monkeypatch.setattr(
         worker_tasks,
         "post_recurring_report",
@@ -55,7 +56,7 @@ def test_recurring_report_failure_marks_job_and_usage(
     def fake_usage(_db, _tid, event_type, *, units=1, meta=None, commit=True):
         usage_events.append({"event_type": event_type, "meta": meta or {}})
 
-    monkeypatch.setattr(worker_tasks, "record_usage", fake_usage)
+    monkeypatch.setattr(tenant_job_mod, "record_usage", fake_usage)
 
     with pytest.raises(RuntimeError, match="slack down"):
         worker_tasks.recurring_report_task.run(

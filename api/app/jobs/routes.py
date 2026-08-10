@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.app.auth.deps import require_tenant_access
+from api.app.auth.tenant_resolve import resolve_tenant_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.plans import require_entitlement
 from api.app.db.session import get_db
@@ -24,7 +25,6 @@ from api.app.slack.schedule import (
     set_slack_history_sync_enabled,
 )
 from api.app.slack.sync_status import get_slack_history_sync_status
-from api.app.tenant import get_client_id
 from worker.queues import queue_for_priority
 from worker.tasks import (
     enqueue_heartbeat,
@@ -168,52 +168,11 @@ def _resolve_enqueue_tenant(
     body_tenant_id: Optional[str],
 ) -> str:
     """Tenant for enqueue: context (JWT/header) preferred; body for platform_owner."""
-    from_ctx = get_client_id() or principal.tenant_id
-    requested = (body_tenant_id or "").strip() or None
-
-    if principal.all_access or principal.role == "platform_owner":
-        chosen = requested or from_ctx
-        if not chosen:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="tenant_id required (body.tenant_id or X-Client-Id)",
-            )
-        try:
-            return str(UUID(chosen))
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid tenant id",
-            ) from exc
-
-    if not from_ctx:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Org user has no tenant membership",
-        )
-
-    try:
-        allowed = str(UUID(from_ctx))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
-        ) from exc
-
-    if requested:
-        try:
-            if str(UUID(requested)) != allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Cross-tenant access denied",
-                )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid tenant id",
-            ) from exc
-
-    return allowed
+    return resolve_tenant_for_principal(
+        principal,
+        body_tenant_id,
+        missing_detail="tenant_id required (body.tenant_id or X-Client-Id)",
+    )
 
 
 @router.post("/heartbeat", response_model=HeartbeatEnqueueResponse)

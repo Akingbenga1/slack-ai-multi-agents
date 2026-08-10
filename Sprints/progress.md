@@ -1,9 +1,9 @@
 # Project progress (Ralph loop)
 
-- **Active sprint:** Sprint 24 (complete)
-- **Last completed task:** 24.5
-- **Current / next task:** none — full `jira-task.md` plan finished through Sprint 24 (deferred themes included)
-- **Batch in progress:** none (24.4–24.5 done this session)
+- **Active sprint:** Sprint 30 (complete)
+- **Last completed task:** 30.4
+- **Current / next task:** none — pattern-upgrade sprints (25–30) finished per `jira-task.md`
+- **Batch in progress:** none (Sprint 30 / Task 30.4 verification done)
 
 - **Open Needs human:**
 
@@ -31,4 +31,4 @@
 
   - Optional: second-org live Slack workspace install after `POST /admin/tenants` / `scripts/second_org_smoke.py` (`docs/demo-readiness.md`)
 
-- **Active sprint folder:** `Sprints/Sprint 24/`
+- **Active sprint folder:** `Sprints/Sprint 30/`

@@ -131,17 +131,17 @@ def test_post_requires_channel(monkeypatch: pytest.MonkeyPatch):
 def test_dispatch_enqueues_due_tenants(monkeypatch: pytest.MonkeyPatch):
     from worker import tasks as worker_tasks
 
+    from tests.schedules.helpers import FakeScheduleDB
+
     t1 = uuid4()
     enqueued: list[dict] = []
 
-    class FakeDB:
-        def close(self):
-            return None
+    from worker import tenant_job as tenant_job_mod
 
-    monkeypatch.setattr(worker_tasks, "session_scope", lambda: FakeDB())
+    monkeypatch.setattr(tenant_job_mod, "session_scope", lambda: FakeScheduleDB())
     monkeypatch.setattr(
         worker_tasks,
-        "list_tenants_for_scheduled_reports",
+        "list_due_recurring_reports",
         lambda _db, cadence=None: [
             {
                 "tenant_id": t1,

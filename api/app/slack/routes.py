@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from api.app.auth.deps import require_tenant_access
+from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.models import Tenant
 from api.app.db.session import get_db
@@ -34,19 +35,7 @@ router = APIRouter(prefix="/slack", tags=["slack"])
 
 
 def _resolve_tenant_id(principal: AuthPrincipal) -> UUID:
-    raw = get_client_id() or principal.tenant_id
-    if not raw:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant_id required (org user membership or X-Client-Id)",
-        )
-    try:
-        return UUID(str(raw))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
-        ) from exc
+    return resolve_tenant_uuid_for_principal(principal)
 
 
 def _install_url(settings: Settings, tenant_id: UUID) -> str:

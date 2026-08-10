@@ -1,4 +1,4 @@
-"""Task 15.4 — LangGraph tools node → MCP client (not in-process only)."""
+"""Task 15.4 / 27.4 — LangGraph tools node → MCP client (+ draft regression)."""
 
 from __future__ import annotations
 
@@ -19,8 +19,48 @@ from api.app.agent.run import run_agent
 from api.app.qdrant.tenant import TenantFilterRequired
 from api.app.settings import Settings
 from mcp_server.server import create_mcp
+from mcp_server.tools.agenda import draft_meeting_agenda
+from mcp_server.tools.draft import draft_meeting_brief
+from mcp_server.tools.notes import draft_meeting_notes
+from mcp_server.tools.report import draft_report
 
 TENANT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+# Tools-node → MCP draft path (Template Method tools + Adapter invoke).
+_AGENT_DRAFT_CASES = [
+    pytest.param(
+        "Brief me for the launch sync",
+        "meeting_brief",
+        "draft_meeting_brief",
+        draft_meeting_brief,
+        "Meeting brief",
+        id="brief",
+    ),
+    pytest.param(
+        "Draft an agenda for the hiring sync",
+        "meeting_agenda",
+        "draft_meeting_agenda",
+        draft_meeting_agenda,
+        "Meeting agenda",
+        id="agenda",
+    ),
+    pytest.param(
+        "Meeting notes from yesterday's beta call",
+        "meeting_notes",
+        "draft_meeting_notes",
+        draft_meeting_notes,
+        "Meeting notes",
+        id="notes",
+    ),
+    pytest.param(
+        "Generate a weekly report for the team",
+        "report",
+        "draft_report",
+        draft_report,
+        "Recurring report",
+        id="report",
+    ),
+]
 
 
 def _fake_mcp_search(**kwargs: Any) -> dict[str, Any]:
@@ -125,3 +165,64 @@ def test_search_knowledge_via_mcp_sync_inject():
     )
     assert len(result.hits) == 1
     assert result.hits[0].filename == "policy.csv"
+
+
+def test_invoke_mcp_adapter_inject():
+    from api.app.agent.mcp_client import invoke_mcp
+
+    async def call_tool(name: str, arguments: dict[str, Any]):
+        assert name == "search_knowledge"
+        return _fake_mcp_search(**arguments)
+
+    payload = invoke_mcp(
+        "search_knowledge",
+        {"client_id": TENANT, "query": "refunds", "limit": 4},
+        call_tool=call_tool,
+    )
+    assert payload["hit_count"] == 1
+    assert payload["client_id"] == TENANT
+
+
+@pytest.mark.parametrize(
+    ("question", "workflow", "tool_name", "helper", "markdown_needle"),
+    _AGENT_DRAFT_CASES,
+)
+def test_run_agent_grounded_draft_via_mcp(
+    question: str,
+    workflow: str,
+    tool_name: str,
+    helper: Any,
+    markdown_needle: str,
+):
+    """Parametrized tools-node → MCP draft Adapter (Sprint 27.4 regression)."""
+    calls: list[str] = []
+
+    async def call_tool(name: str, arguments: dict[str, Any]):
+        calls.append(name)
+        if name == tool_name:
+            return helper(search_tool_fn=_fake_mcp_search, **arguments)
+        if name == "search_knowledge":
+            return _fake_mcp_search(**arguments)
+        raise AssertionError(f"unexpected tool {name}")
+
+    settings = Settings(
+        agent_checkpointer="memory",
+        anthropic_api_key="",
+        agent_retrieve_backend="mcp",
+    )
+    out = run_agent(
+        client_id=TENANT,
+        question=question,
+        conversation_id=f"draft-{workflow}",
+        settings=settings,
+        checkpointer=MemorySaver(),
+        mcp_call_tool=call_tool,
+        chat_model=StubChatModel(),
+        record_usage=False,
+    )
+    assert out["workflow"] == workflow
+    assert tool_name in calls
+    assert out["hedge"] is False
+    assert out.get("meeting_draft")
+    assert markdown_needle in out["meeting_draft"]
+    assert "stub:" in out["answer"]

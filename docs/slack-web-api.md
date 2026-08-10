@@ -5,15 +5,12 @@ Used by Sprint 9 live sync to list channels and pull messages with the install-s
 ## Client
 
 ```python
-from api.app.slack.client import (
-    SlackWebClient,
-    slack_client_for_tenant,
-    slack_client_for_team,
-)
+from api.app.slack.client import SlackWebClient
+from api.app.slack.store import client_for_tenant, client_for_team
 
 # From install store (preferred)
-client = slack_client_for_tenant(db, settings, tenant_id)
-# or: slack_client_for_team(db, settings, team_id)
+client = client_for_tenant(db, settings, tenant_id)
+# or: client_for_team(db, settings, team_id)
 
 for channel in client.conversations_list():
     channel_id = channel["id"]
@@ -82,7 +79,7 @@ enqueue_slack_history_sync(client_id=str(tenant_id))  # optional channel_ids=[..
 
 Domain helper: `api.app.slack.sync.sync_slack_history` (list → history with watermark → `WEB_API` normalize → `ingest_messages` → upsert watermark).
 
-**Beat:** hourly `worker.dispatch_slack_history_syncs` enqueues sync for tenants with a Slack install when `agent_configs.schedules.slack_history_sync.enabled` is not false (default on). Toggle via `GET`/`PATCH /jobs/slack-history-sync/schedule`. **On-demand:** `POST /jobs/slack-history-sync` (auth required; bypasses enable flag). **Status:** `GET /jobs/slack-history-sync/status` (last success/failure + watermarks). See `docs/celery.md`.
+**Beat:** hourly `worker.dispatch_slack_history_syncs` enqueues sync for tenants with a Slack install when `agent_configs.schedules.slack_history_sync.enabled` is not false (default on). Toggle via `GET`/`PATCH /agent/schedules` (or legacy `GET`/`PATCH /jobs/slack-history-sync/schedule`). **On-demand:** `POST /jobs/slack-history-sync` (auth required; bypasses enable flag). **Status:** `GET /jobs/slack-history-sync/status` (last success/failure + watermarks). See `docs/celery.md`.
 
 ## Scopes
 

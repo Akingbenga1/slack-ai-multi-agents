@@ -2,9 +2,11 @@
 name: dtc-ralph-loop
 description: >-
   Ralph-loop for the DTC AI/automation stack using Project-Documents/jira-task.md,
-  Sprints/ folders, task journals, project-wide progress.md, 3-task batches, and
-  Needs-human blockers. Use when the user asks to run the Ralph loop,
-  continue a sprint, or resume from progress.md.
+  Sprints/ folders, task journals, project-wide progress.md, 3-task batches,
+  Needs-human blockers, and Project-Documents/TechStack/software-developement-patterns.md
+  for design-pattern / refactor / extensibility work. Use when the user asks to run
+  the Ralph loop, continue a sprint, resume from progress.md, or refactor for
+  maintainability / design patterns.
 ---
 
 # Ralph Loop 
@@ -21,6 +23,7 @@ All planning and requirements docs live under **`Project-Documents/`**. Do not l
 - **If `Project-Documents/jira-task.md` is missing** but `Project-Documents/raw-project-description.md` is present (and has content): **ask the user for permission** to create `jira-task.md`. Do not create it until they approve. After approval, derive the full sprint/task plan from the details in `Project-Documents/raw-project-description.md` and write `Project-Documents/jira-task.md` in this project only — never copy or reuse `jira-task.md` (or other source docs) from a sibling/other project.
 - For requirements context (commercial ops model, what each build serves, locked stack), follow docs in `Project-Documents/` (e.g. `technology-stack-document.md`, `architecture-description.md`, `user-stories.md`, `industry-practice.md`). Prefer those over guessing why a task exists.
 - For architecture and tool details (APIs, RAG patterns, integration options), follow `Project-Documents/architecture-description.md` and `Project-Documents/technology-stack-document.md`. Prefer those over guessing schemas, endpoints, or vendor choices.
+- For **software design patterns, refactors, decoupling, workflow extensibility, or “which pattern” decisions**, read and follow **`Project-Documents/TechStack/software-developement-patterns.md`** before changing code. Use its process (analyze → match pattern → implement only when it solves a real smell; prefer simplicity). Consult `Project-Documents/TechStack/references/` (`creational.md`, `structural.md`, `behavioral.md`) for pattern details. Prefer those over inventing structure.
 
 ### Project-Documents contents
 
@@ -28,11 +31,18 @@ All planning and requirements docs live under **`Project-Documents/`**. Do not l
 Project-Documents/
   jira-task.md                      # sprint/task plan (source of truth)
   raw-project-description.md        # original client brief
+  refactor plan (when present)
   architecture-description.md
   technology-stack-document.md
   user-stories.md
   industry-practice.md
   sacalabilty-problems.md
+  TechStack/
+    software-developement-patterns.md   # design-pattern guidance (required for refactor/pattern work)
+    references/
+      creational.md
+      structural.md
+      behavioral.md
 ```
 
 ---
@@ -141,6 +151,7 @@ Add task-relevant sections when useful, e.g.:
 ## Rules
 
 - Work tasks in dependency order per `Project-Documents/jira-task.md` (sprint order, then task numbers within the sprint). Read `Sprints/progress.md` (project-wide), the active sprint’s `progress.md`, and relevant journals at the start of every run and resume from the next unfinished task — do not restart from Task 1.1 / Sprint 1 if progress already exists.
+- When a task adds/changes agent workflows, MCP tools, Slack delivery paths, schedules, ingest/worker pipelines, or otherwise refactors for maintainability: **read `Project-Documents/TechStack/software-developement-patterns.md` first**, apply its agent behavior contract (don’t over-engineer; patterns only for real smells), and note pattern choices in the task journal **Decision log**. Do not skip this for “small” workflow additions that extend the `if`/regex ladder instead of registering a Strategy.
 - Work on at most 3 tasks per agent session to limit context rot. After finishing (or partially completing) that batch of up to 3 tasks, update `Sprints/progress.md`, the active sprint’s `progress.md`, and the relevant journals, then stop and tell me the resume prompt for the next batch (e.g. “Continue Sprint 1 from Task 1.4”).
 - For each task: implement what you can → update `taskN.N.md` / `taskN.N-journal.md` → update both progress files → then continue to the next task in this batch while this session is active.
 - Do NOT do deep acceptance-criteria verification or long QA loops. Light smoke checks only if quick.

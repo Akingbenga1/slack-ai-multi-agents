@@ -1,4 +1,8 @@
-"""Dry-run / invoke helpers for the offline agent (Sprint 13)."""
+"""Dry-run / invoke helpers for the offline agent (Sprint 13).
+
+Prefer ``deps=AgentRuntimeDeps(...)`` (Sprint 25.1); individual kwargs remain
+for back-compat with tests, Slack injects, and CLI scripts.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +14,14 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.orm import Session
 
 from api.app.agent.checkpointer import get_checkpointer, thread_id_for_tenant
+from api.app.agent.deps import AgentRuntimeDeps, build_agent_deps
 from api.app.agent.graph import build_agent_graph, build_report_graph
 from api.app.agent.llm import ChatModel, get_chat_model, message_content
 from api.app.agent.mcp_client import McpCallTool
 from api.app.agent.nodes.retrieve import SearchFn
 from api.app.db.session import SessionLocal
 from api.app.logging_config import get_logger
-from api.app.settings import Settings, get_settings
+from api.app.settings import Settings
 
 logger = get_logger("api.agent.run")
 
@@ -32,6 +37,7 @@ def run_agent(
     client_id: str,
     question: str,
     conversation_id: str | None = None,
+    deps: AgentRuntimeDeps | None = None,
     settings: Settings | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     search_fn: Optional[SearchFn] = None,
@@ -49,21 +55,42 @@ def run_agent(
     own delivery. Returns answer, workflow, model_tier, retrieved_chunks,
     usage_tokens, thread_id, hedge. Optional ``attached_evidence`` carries
     Slack attachment text (Sprint 23) into graph state.
+
+    Prefer ``deps=AgentRuntimeDeps(...)``; kwargs override or stand alone.
     """
-    settings = settings or get_settings()
+    resolved = build_agent_deps(
+        deps,
+        settings=settings,
+        checkpointer=checkpointer,
+        search_fn=search_fn,
+        mcp_call_tool=mcp_call_tool,
+        chat_model=chat_model,
+        db_factory=db_factory,
+        system_prompt=system_prompt,
+    )
+    settings = resolved.settings
     cid = str(UUID(str(client_id).strip()))
     q = (question or "").strip()
     if not q:
         raise ValueError("question must be non-empty")
 
-    saver = checkpointer if checkpointer is not None else get_checkpointer(settings)
-    model = chat_model if chat_model is not None else get_chat_model(settings)
-    factory = db_factory if record_usage else None
+    saver = (
+        resolved.checkpointer
+        if resolved.checkpointer is not None
+        else get_checkpointer(settings)
+    )
+    model = (
+        resolved.chat_model
+        if resolved.chat_model is not None
+        else get_chat_model(settings)
+    )
+    factory = resolved.db_factory if record_usage else None
     if record_usage and factory is None:
         factory = _default_db_factory
 
     org_prompt: str | None = None
-    if system_prompt is None:
+    prompt_override = resolved.system_prompt
+    if prompt_override is None:
         prompt_db = _default_db_factory()
         try:
             from api.app.agent.config_store import load_org_system_prompt
@@ -75,13 +102,16 @@ def run_agent(
             prompt_db.close()
 
     graph = build_agent_graph(
-        settings=settings,
-        checkpointer=saver,
-        search_fn=search_fn,
-        mcp_call_tool=mcp_call_tool,
-        chat_model=model,
-        db_factory=factory,
-        system_prompt=system_prompt,
+        deps=AgentRuntimeDeps(
+            settings=settings,
+            checkpointer=saver,
+            search_fn=resolved.search_fn,
+            mcp_call_tool=resolved.mcp_call_tool,
+            chat_model=model,
+            db_factory=factory,
+            system_prompt=prompt_override,
+            top_k=resolved.top_k,
+        )
     )
 
     thread_id = thread_id_for_tenant(cid, conversation_id or str(uuid4()))
@@ -149,6 +179,7 @@ def run_report(
     channel: str | None = None,
     topic: str | None = None,
     conversation_id: str | None = None,
+    deps: AgentRuntimeDeps | None = None,
     settings: Settings | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     search_fn: Optional[SearchFn] = None,
@@ -164,8 +195,20 @@ def run_report(
     Forces ``workflow=report`` and Sonnet escalation. Does not post to Slack —
     Celery Beat (Sprint 17.3) will own delivery. ``window_label`` describes the
     digest window (e.g. ``last 7 days``); optional ``channel`` scopes retrieval.
+
+    Prefer ``deps=AgentRuntimeDeps(...)``; kwargs override or stand alone.
     """
-    settings = settings or get_settings()
+    resolved = build_agent_deps(
+        deps,
+        settings=settings,
+        checkpointer=checkpointer,
+        search_fn=search_fn,
+        mcp_call_tool=mcp_call_tool,
+        chat_model=chat_model,
+        db_factory=db_factory,
+        system_prompt=system_prompt,
+    )
+    settings = resolved.settings
     cid = str(UUID(str(client_id).strip()))
     window = (window_label or "").strip() or DEFAULT_REPORT_WINDOW
     chan = (channel or "").strip() or None
@@ -173,20 +216,31 @@ def run_report(
     if chan:
         subject = f"{subject} (channel {chan})"
 
-    saver = checkpointer if checkpointer is not None else get_checkpointer(settings)
-    model = chat_model if chat_model is not None else get_chat_model(settings)
-    factory = db_factory if record_usage else None
+    saver = (
+        resolved.checkpointer
+        if resolved.checkpointer is not None
+        else get_checkpointer(settings)
+    )
+    model = (
+        resolved.chat_model
+        if resolved.chat_model is not None
+        else get_chat_model(settings)
+    )
+    factory = resolved.db_factory if record_usage else None
     if record_usage and factory is None:
         factory = _default_db_factory
 
     graph = build_report_graph(
-        settings=settings,
-        checkpointer=saver,
-        search_fn=search_fn,
-        mcp_call_tool=mcp_call_tool,
-        chat_model=model,
-        db_factory=factory,
-        system_prompt=system_prompt,
+        deps=AgentRuntimeDeps(
+            settings=settings,
+            checkpointer=saver,
+            search_fn=resolved.search_fn,
+            mcp_call_tool=resolved.mcp_call_tool,
+            chat_model=model,
+            db_factory=factory,
+            system_prompt=resolved.system_prompt,
+            top_k=resolved.top_k,
+        )
     )
 
     thread_id = thread_id_for_tenant(

@@ -185,51 +185,97 @@ async def test_search_knowledge_ok(mcp_session: ClientSession):
     assert sc["hits"][0]["channel"] == "C_KNOWLEDGE"
 
 
-@pytest.mark.anyio
-async def test_draft_meeting_brief_ok(mcp_session: ClientSession):
-    result = await mcp_session.call_tool(
+# Grounded draft tools (Template Method + create_mcp registry row).
+# Adding a tool = outline_fn + registry row + one row here.
+_GROUNDED_DRAFT_OK = [
+    pytest.param(
         "draft_meeting_brief",
         {"client_id": TENANT, "topic": "onboarding checklist"},
-    )
-    assert not result.isError
-    sc = result.structuredContent
-    assert sc is not None
-    assert sc["client_id"] == TENANT
-    assert sc["hedged"] is False
-    assert "Meeting brief" in sc["markdown"]
-    assert any(s["heading"] == "Context from knowledge" for s in sc["sections"])
-
-
-@pytest.mark.anyio
-async def test_draft_meeting_agenda_ok(mcp_session: ClientSession):
-    result = await mcp_session.call_tool(
+        "Meeting brief",
+        "sections",
+        ("Context from knowledge",),
+        id="brief",
+    ),
+    pytest.param(
         "draft_meeting_agenda",
         {"client_id": TENANT, "topic": "onboarding checklist"},
-    )
-    assert not result.isError
-    sc = result.structuredContent
-    assert sc is not None
-    assert sc["client_id"] == TENANT
-    assert sc["hedged"] is False
-    assert "Meeting agenda" in sc["markdown"]
-    assert len(sc["items"]) >= 3
+        "Meeting agenda",
+        "items",
+        (),
+        id="agenda",
+    ),
+    pytest.param(
+        "draft_meeting_notes",
+        {"client_id": TENANT, "topic": "onboarding checklist"},
+        "Meeting notes",
+        "sections",
+        ("Action items", "Decisions"),
+        id="notes",
+    ),
+    pytest.param(
+        "draft_report",
+        {"client_id": TENANT, "window_label": "last 7 days"},
+        "Recurring report",
+        "sections",
+        ("Themes", "Decisions", "Open questions"),
+        id="report",
+    ),
+]
+
+_GROUNDED_DRAFT_HEDGE = [
+    pytest.param(
+        draft_meeting_brief,
+        {"client_id": TENANT, "topic": "mystery topic"},
+        id="brief",
+    ),
+    pytest.param(
+        draft_meeting_agenda,
+        {"client_id": TENANT, "topic": "mystery topic"},
+        id="agenda",
+    ),
+    pytest.param(
+        draft_meeting_notes,
+        {"client_id": TENANT, "topic": "mystery topic", "kind": "slack_message"},
+        id="notes",
+    ),
+    pytest.param(
+        draft_report,
+        {
+            "client_id": TENANT,
+            "window_label": "last 7 days",
+            "kind": "slack_message",
+        },
+        id="report",
+    ),
+]
 
 
 @pytest.mark.anyio
-async def test_draft_meeting_notes_ok(mcp_session: ClientSession):
-    result = await mcp_session.call_tool(
-        "draft_meeting_notes",
-        {"client_id": TENANT, "topic": "onboarding checklist"},
-    )
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "markdown_needle", "shape_key", "headings"),
+    _GROUNDED_DRAFT_OK,
+)
+async def test_grounded_draft_tool_ok(
+    mcp_session: ClientSession,
+    tool_name: str,
+    arguments: dict[str, Any],
+    markdown_needle: str,
+    shape_key: str,
+    headings: tuple[str, ...],
+):
+    result = await mcp_session.call_tool(tool_name, arguments)
     assert not result.isError
     sc = result.structuredContent
     assert sc is not None
     assert sc["client_id"] == TENANT
     assert sc["hedged"] is False
-    assert "Meeting notes" in sc["markdown"]
-    headings = [s["heading"] for s in sc["sections"]]
-    assert "Action items" in headings
-    assert "Decisions" in headings
+    assert markdown_needle in sc["markdown"]
+    if shape_key == "items":
+        assert len(sc["items"]) >= 3
+    else:
+        found = {s["heading"] for s in sc["sections"]}
+        for h in headings:
+            assert h in found
 
 
 def test_search_knowledge_tool_fail_closed():
@@ -239,90 +285,18 @@ def test_search_knowledge_tool_fail_closed():
         search_knowledge_tool(client_id="  ", query="x")
 
 
-def test_agenda_helper_hedge_when_empty():
-    def empty_search(**kwargs: Any) -> dict[str, Any]:
+@pytest.mark.parametrize(("helper", "kwargs"), _GROUNDED_DRAFT_HEDGE)
+def test_grounded_draft_helper_hedge_when_empty(helper: Any, kwargs: dict[str, Any]):
+    def empty_search(**search_kwargs: Any) -> dict[str, Any]:
         return _stub_search_result(
-            client_id=kwargs["client_id"],
-            query=kwargs.get("query") or kwargs.get("topic") or "",
+            client_id=search_kwargs["client_id"],
+            query=search_kwargs.get("query")
+            or search_kwargs.get("topic")
+            or "",
             hits=[],
         )
 
-    out = draft_meeting_agenda(
-        client_id=TENANT,
-        topic="mystery topic",
-        search_tool_fn=empty_search,
-    )
-    assert out["hedged"] is True
-    assert "Insufficient" in out["note"] or "placeholder" in out["note"].lower()
-
-
-def test_notes_helper_hedge_when_empty():
-    def empty_search(**kwargs: Any) -> dict[str, Any]:
-        return _stub_search_result(
-            client_id=kwargs["client_id"],
-            query=kwargs.get("query") or kwargs.get("topic") or "",
-            hits=[],
-        )
-
-    out = draft_meeting_notes(
-        client_id=TENANT,
-        topic="mystery topic",
-        kind="slack_message",
-        search_tool_fn=empty_search,
-    )
-    assert out["hedged"] is True
-    assert "Insufficient" in out["note"] or "placeholder" in out["note"].lower()
-
-
-@pytest.mark.anyio
-async def test_draft_report_ok(mcp_session: ClientSession):
-    result = await mcp_session.call_tool(
-        "draft_report",
-        {"client_id": TENANT, "window_label": "last 7 days"},
-    )
-    assert not result.isError
-    sc = result.structuredContent
-    assert sc is not None
-    assert sc["client_id"] == TENANT
-    assert sc["hedged"] is False
-    assert "Recurring report" in sc["markdown"]
-    headings = [s["heading"] for s in sc["sections"]]
-    assert "Themes" in headings
-    assert "Decisions" in headings
-    assert "Open questions" in headings
-
-
-def test_report_helper_hedge_when_empty():
-    def empty_search(**kwargs: Any) -> dict[str, Any]:
-        return _stub_search_result(
-            client_id=kwargs["client_id"],
-            query=kwargs.get("query") or kwargs.get("topic") or "",
-            hits=[],
-        )
-
-    out = draft_report(
-        client_id=TENANT,
-        window_label="last 7 days",
-        kind="slack_message",
-        search_tool_fn=empty_search,
-    )
-    assert out["hedged"] is True
-    assert "Insufficient" in out["note"] or "placeholder" in out["note"].lower()
-
-
-def test_draft_helper_hedge_when_empty():
-    def empty_search(**kwargs: Any) -> dict[str, Any]:
-        return _stub_search_result(
-            client_id=kwargs["client_id"],
-            query=kwargs.get("query") or kwargs.get("topic") or "",
-            hits=[],
-        )
-
-    out = draft_meeting_brief(
-        client_id=TENANT,
-        topic="mystery topic",
-        search_tool_fn=empty_search,
-    )
+    out = helper(search_tool_fn=empty_search, **kwargs)
     assert out["hedged"] is True
     assert "Insufficient" in out["note"] or "placeholder" in out["note"].lower()
 

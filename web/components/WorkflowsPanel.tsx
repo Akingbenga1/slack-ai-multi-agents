@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -42,15 +42,11 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
       params.set("include_personal_for", copyOwner.trim());
     }
     const qs = params.toString();
-    const res = await fetch(
-      `${getApiBaseUrl()}/workflows${qs ? `?${qs}` : ""}`,
-      { headers: apiAuthHeaders(accessToken, tenantId) },
+    const body = await apiClient.get<{ templates: WorkflowTemplate[] }>(
+      `/workflows${qs ? `?${qs}` : ""}`,
+      { accessToken, clientId: tenantId },
     );
-    if (!res.ok) {
-      throw new Error((await res.text()) || res.statusText);
-    }
-    const body = (await res.json()) as { templates: WorkflowTemplate[] };
-    setItems(body.templates || []);
+    setItems(body?.templates || []);
   }, [accessToken, tenantId, q, includePersonal, copyOwner]);
 
   useEffect(() => {
@@ -81,21 +77,20 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
     setBusyId(id);
     setNote(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/workflows/${id}/copy`, {
-        method: "POST",
-        headers: {
-          ...apiAuthHeaders(accessToken, tenantId),
-          "Content-Type": "application/json",
+      const draft = await apiClient.post<WorkflowTemplate>(
+        `/workflows/${id}/copy`,
+        {
+          accessToken,
+          clientId: tenantId,
+          json: {
+            owner_slack_user_id: copyOwner.trim() || "U_PORTAL",
+            title: undefined,
+          },
         },
-        body: JSON.stringify({
-          owner_slack_user_id: copyOwner.trim() || "U_PORTAL",
-          title: undefined,
-        }),
-      });
-      if (!res.ok) {
-        throw new Error((await res.text()) || res.statusText);
+      );
+      if (!draft) {
+        throw new Error("Empty copy response");
       }
-      const draft = (await res.json()) as WorkflowTemplate;
       setNote(
         `Copied personal draft “${draft.title}” (${draft.id}). Original unchanged.`,
       );

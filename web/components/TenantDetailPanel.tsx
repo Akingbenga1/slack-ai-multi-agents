@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { ApiError, apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -51,32 +51,27 @@ export function TenantDetailPanel({ accessToken, tenantId }: Props) {
     }
     setError(null);
     try {
-      const [tRes, aRes] = await Promise.all([
-        fetch(`${getApiBaseUrl()}/admin/tenants/${tenantId}`, {
-          headers: apiAuthHeaders(accessToken, tenantId),
+      const [tData, aData] = await Promise.all([
+        apiClient.get<TenantDetail>(`/admin/tenants/${tenantId}`, {
+          accessToken,
+          clientId: tenantId,
         }),
-        fetch(
-          `${getApiBaseUrl()}/admin/audit-logs?tenant_id=${encodeURIComponent(tenantId)}&limit=20`,
-          { headers: apiAuthHeaders(accessToken, null) },
+        apiClient.get<{ logs: AuditRow[] }>(
+          `/admin/audit-logs?tenant_id=${encodeURIComponent(tenantId)}&limit=20`,
+          { accessToken, clientId: null },
         ),
       ]);
-      const tData = await tRes.json().catch(() => ({}));
-      const aData = await aRes.json().catch(() => ({}));
-      if (!tRes.ok) {
-        setError(
-          typeof tData.detail === "string"
-            ? tData.detail
-            : `Failed to load tenant (${tRes.status})`,
-        );
+      if (!tData) {
+        setError("Failed to load tenant");
         setDetail(null);
         return;
       }
-      setDetail(tData as TenantDetail);
+      setDetail(tData);
       const ents = (tData.entitlements || {}) as Record<string, unknown>;
       setTokensDaily(String(ents.tokens_daily ?? ""));
       setTokensMonthly(String(ents.tokens_monthly ?? ""));
       setJobsDaily(String(ents.jobs_daily ?? ""));
-      setLogs(Array.isArray(aData.logs) ? aData.logs : []);
+      setLogs(Array.isArray(aData?.logs) ? aData.logs : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     }
@@ -91,28 +86,18 @@ export function TenantDetailPanel({ accessToken, tenantId }: Props) {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(
-        `${getApiBaseUrl()}/admin/tenants/${tenantId}/status`,
+      const data = await apiClient.patch<{ status: string }>(
+        `/admin/tenants/${tenantId}/status`,
         {
-          method: "PATCH",
-          headers: {
-            ...apiAuthHeaders(accessToken, tenantId),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ status: next }),
+          accessToken,
+          clientId: tenantId,
+          json: { status: next },
         },
       );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMessage(
-          typeof data.detail === "string"
-            ? data.detail
-            : `Status update failed (${res.status})`,
-        );
-        return;
-      }
-      setMessage(`Tenant status set to ${data.status}`);
+      setMessage(`Tenant status set to ${data?.status ?? next}`);
       await load();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : "Status update failed");
     } finally {
       setBusy(false);
     }
@@ -127,28 +112,15 @@ export function TenantDetailPanel({ accessToken, tenantId }: Props) {
     if (tokensMonthly !== "") body.tokens_monthly = Number(tokensMonthly);
     if (jobsDaily !== "") body.jobs_daily = Number(jobsDaily);
     try {
-      const res = await fetch(
-        `${getApiBaseUrl()}/admin/tenants/${tenantId}/budgets`,
-        {
-          method: "PATCH",
-          headers: {
-            ...apiAuthHeaders(accessToken, tenantId),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMessage(
-          typeof data.detail === "string"
-            ? data.detail
-            : `Budget override failed (${res.status})`,
-        );
-        return;
-      }
+      await apiClient.patch(`/admin/tenants/${tenantId}/budgets`, {
+        accessToken,
+        clientId: tenantId,
+        json: body,
+      });
       setMessage("Budgets updated");
       await load();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : "Budget override failed");
     } finally {
       setBusy(false);
     }

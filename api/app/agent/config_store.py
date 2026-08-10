@@ -9,11 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.app.db.models import AgentConfig
-from api.app.reports.schedule import (
-    DEFAULT_AGENT_NAME,
-    get_recurring_report_schedule,
-)
-from api.app.slack.schedule import is_slack_history_sync_enabled
+from api.app.schedules import DEFAULT_AGENT_NAME, read_all_kinds
 
 # Row key stays ``name="default"`` (schedule lookups). Display name lives in
 # ``extra.display_name``. Allowlist: ``{"channels": ["C123", ...]}``.
@@ -76,19 +72,13 @@ def agent_settings_dict(db: Session, tenant_id: UUID) -> dict[str, Any]:
     allowlist = normalize_allowlist(config.allowlist) if config.allowlist else {
         "channels": []
     }
-    report = get_recurring_report_schedule(db, tenant_id)
     return {
         "client_id": str(tenant_id),
         "config_id": str(config.id),
         "name": _display_name(config),
         "system_prompt": config.system_prompt,
         "allowlist": allowlist,
-        "schedules": {
-            "slack_history_sync": {
-                "enabled": is_slack_history_sync_enabled(db, tenant_id),
-            },
-            "recurring_report": report,
-        },
+        "schedules": read_all_kinds(db, tenant_id),
         "updated_at": config.updated_at.isoformat() if config.updated_at else None,
     }
 
@@ -106,8 +96,9 @@ def update_agent_settings(
     """
     Update display name / prompt / allowlist on the default agent_config.
 
-    Schedule enable/disable stays on ``/jobs/.../schedule`` endpoints.
-    Internal row ``name`` remains ``default``.
+    Schedule enable/disable stays on ``PATCH /agent/schedules`` (legacy
+    ``/jobs/.../schedule`` adapters remain). Internal row ``name`` remains
+    ``default``.
     """
     config = get_or_create_default_config(db, tenant_id)
     if name is not None:

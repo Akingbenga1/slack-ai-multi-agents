@@ -41,8 +41,10 @@ class Settings(BaseSettings):
     agent_min_score: float = 0.70
     # memory | postgres — Postgres tables created via checkpointer.setup()
     agent_checkpointer: str = "postgres"
-    # mcp | direct — tools node default is MCP client (stdio); direct = in-process
+    # mcp | direct — tools node default is MCP client; direct = in-process retrieval
     agent_retrieve_backend: str = "mcp"
+    # in_process (API/worker default) | stdio (external / Inspector-style)
+    agent_mcp_transport: str = "in_process"
     # Optional override for stdio MCP launch (default: current python -m mcp_server)
     agent_mcp_command: str = ""
     agent_mcp_args: str = ""

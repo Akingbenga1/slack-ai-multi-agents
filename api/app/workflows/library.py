@@ -43,9 +43,14 @@ class StoreResult:
 
 
 def require_client_id(client_id: str | None) -> str:
-    if not client_id or not str(client_id).strip():
-        raise ValueError(MSG_NO_CLIENT)
-    return str(client_id).strip()
+    """Fail-closed wrapper; preserves workflow library ValueError message."""
+    from api.app.tenant import ClientIdRequired
+    from api.app.tenant import require_client_id as _require_client_id
+
+    try:
+        return _require_client_id(client_id, message=MSG_NO_CLIENT)
+    except ClientIdRequired as exc:
+        raise ValueError(MSG_NO_CLIENT) from exc
 
 
 def content_hash_bytes(data: bytes) -> str:

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.app.auth.deps import require_tenant_access
+from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.checkout import create_checkout_session
 from api.app.billing.customers import BillingError, ensure_billing_customer, get_billing_customer
@@ -18,7 +19,6 @@ from api.app.billing.webhooks import WebhookError, construct_stripe_event, handl
 from api.app.db.session import get_db
 from api.app.logging_config import get_logger
 from api.app.settings import Settings, get_settings
-from api.app.tenant import get_client_id
 
 logger = get_logger("api.billing.routes")
 
@@ -49,19 +49,7 @@ def _customer_response(row) -> BillingCustomerResponse:
 
 
 def _resolve_tenant_id(principal: AuthPrincipal) -> UUID:
-    raw = get_client_id() or principal.tenant_id
-    if not raw:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant_id required (org user membership or X-Client-Id)",
-        )
-    try:
-        return UUID(str(raw))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
-        ) from exc
+    return resolve_tenant_uuid_for_principal(principal)
 
 
 @router.post("/customers/ensure", response_model=BillingCustomerResponse)

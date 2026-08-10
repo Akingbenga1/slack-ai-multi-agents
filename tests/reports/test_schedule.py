@@ -1,22 +1,17 @@
-"""Unit tests for recurring report schedule (Task 17.2)."""
+"""Unit tests for recurring report schedule (Task 17.2 / 28.x)."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from api.app.db.models import AgentConfig
 from api.app.reports import schedule as sched
+from tests.schedules.helpers import FakeScheduleDB, report_block
 
 
 def test_defaults_disabled_without_config():
-    class FakeDB:
-        def scalar(self, _stmt):
-            return None
-
-    out = sched.get_recurring_report_schedule(FakeDB(), uuid4())
+    out = sched.get_recurring_report_schedule(FakeScheduleDB(), uuid4())
     assert out["enabled"] is False
     assert out["cadence"] == "weekly"
     assert out["channel_id"] is None
@@ -25,24 +20,19 @@ def test_defaults_disabled_without_config():
 
 def test_get_respects_stored_fields():
     tenant_id = uuid4()
-    config = AgentConfig(
-        tenant_id=tenant_id,
-        name=sched.DEFAULT_AGENT_NAME,
-        schedules={
-            sched.SCHEDULE_KEY: {
-                "enabled": True,
-                "channel_id": "C123",
-                "cadence": "daily",
-                "window_label": "last 24 hours",
-            }
+    db = FakeScheduleDB()
+    db.seed(
+        tenant_id,
+        {
+            sched.SCHEDULE_KEY: report_block(
+                enabled=True,
+                channel_id="C123",
+                cadence="daily",
+                window_label="last 24 hours",
+            )
         },
     )
-
-    class FakeDB:
-        def scalar(self, _stmt):
-            return config
-
-    out = sched.get_recurring_report_schedule(FakeDB(), tenant_id)
+    out = sched.get_recurring_report_schedule(db, tenant_id)
     assert out["enabled"] is True
     assert out["channel_id"] == "C123"
     assert out["cadence"] == "daily"
@@ -51,22 +41,7 @@ def test_get_respects_stored_fields():
 
 def test_set_creates_and_updates():
     tenant_id = uuid4()
-    store: dict[str, AgentConfig] = {}
-
-    class FakeDB:
-        def scalar(self, _stmt):
-            return store.get("cfg")
-
-        def add(self, row):
-            store["cfg"] = row
-
-        def commit(self):
-            return None
-
-        def refresh(self, row):
-            return row
-
-    db = FakeDB()
+    db = FakeScheduleDB()
     created = sched.set_recurring_report_schedule(
         db,
         tenant_id=tenant_id,
@@ -100,60 +75,53 @@ def test_normalize_cadence_rejects_bad():
 
 def test_list_tenants_requires_enabled_channel(monkeypatch: pytest.MonkeyPatch):
     t_ok, t_no_chan, t_off = uuid4(), uuid4(), uuid4()
-
-    class FakeDB:
-        def scalars(self, _stmt):
-            return SimpleNamespace(all=lambda: [t_ok, t_no_chan, t_off])
-
-    def fake_get(_db, tenant_id):
-        if tenant_id == t_ok:
-            return {
-                "enabled": True,
-                "channel_id": "C1",
-                "cadence": "weekly",
-                "window_label": "last 7 days",
-            }
-        if tenant_id == t_no_chan:
-            return {
-                "enabled": True,
-                "channel_id": None,
-                "cadence": "weekly",
-                "window_label": "last 7 days",
-            }
-        return {
-            "enabled": False,
-            "channel_id": "C2",
-            "cadence": "daily",
-            "window_label": "last 24 hours",
-        }
-
-    monkeypatch.setattr(sched, "get_recurring_report_schedule", fake_get)
-    monkeypatch.setattr(sched, "tenant_has_entitlement", lambda *_a, **_k: True)
-    due = sched.list_tenants_for_scheduled_reports(FakeDB())
+    db = FakeScheduleDB(install_tenant_ids=[t_ok, t_no_chan, t_off])
+    db.seed(
+        t_ok,
+        {
+            sched.SCHEDULE_KEY: report_block(
+                enabled=True, channel_id="C1", cadence="weekly"
+            )
+        },
+    )
+    db.seed(
+        t_no_chan,
+        {sched.SCHEDULE_KEY: report_block(enabled=True, channel_id=None)},
+    )
+    db.seed(
+        t_off,
+        {
+            sched.SCHEDULE_KEY: report_block(
+                enabled=False, channel_id="C2", cadence="daily"
+            )
+        },
+    )
+    monkeypatch.setattr(
+        "api.app.schedules.kinds.tenant_has_entitlement",
+        lambda *_a, **_k: True,
+    )
+    due = sched.list_tenants_for_scheduled_reports(db)
     assert len(due) == 1
     assert due[0]["tenant_id"] == t_ok
     assert due[0]["channel_id"] == "C1"
 
-    daily = sched.list_tenants_for_scheduled_reports(FakeDB(), cadence="daily")
+    daily = sched.list_tenants_for_scheduled_reports(db, cadence="daily")
     assert daily == []
 
 
 def test_list_tenants_skips_unentitled(monkeypatch: pytest.MonkeyPatch):
     t_ok = uuid4()
-
-    class FakeDB:
-        def scalars(self, _stmt):
-            return SimpleNamespace(all=lambda: [t_ok])
-
-    monkeypatch.setattr(
-        sched,
-        "get_recurring_report_schedule",
-        lambda *_a, **_k: {
-            "enabled": True,
-            "channel_id": "C1",
-            "cadence": "weekly",
-            "window_label": "last 7 days",
+    db = FakeScheduleDB(install_tenant_ids=[t_ok])
+    db.seed(
+        t_ok,
+        {
+            sched.SCHEDULE_KEY: report_block(
+                enabled=True, channel_id="C1", cadence="weekly"
+            )
         },
     )
-    monkeypatch.setattr(sched, "tenant_has_entitlement", lambda *_a, **_k: False)
-    assert sched.list_tenants_for_scheduled_reports(FakeDB()) == []
+    monkeypatch.setattr(
+        "api.app.schedules.kinds.tenant_has_entitlement",
+        lambda *_a, **_k: False,
+    )
+    assert sched.list_tenants_for_scheduled_reports(db) == []

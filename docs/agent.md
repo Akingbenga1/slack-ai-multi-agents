@@ -22,9 +22,46 @@ Agent graph: **route → tools → compose**. The tools node invokes bundled MCP
 2. **tools** — MCP client → `search_knowledge` (tenant `client_id` required; fail-closed). Meeting drafts / `draft_report` / `start_onboarding` for typed workflows. Set `AGENT_RETRIEVE_BACKEND=direct` only for in-process debugging.  
 3. **compose** — Anthropic (or stub) grounded on evidence with **workflow-specific prompts**; records `llm_tokens` usage. Onboarding returns the stub message without an LLM call. Org `system_prompt` (if set) is prepended to the workflow system prompt.
 
+## Workflow registry & Strategies (Sprint 25–26 / 30)
+
+Pattern intent and phased rollout: [`Project-Documents/review.md`](../Project-Documents/review.md) (§5 registry / delivery; P0–P6). Apply patterns only for real smells — see [`Project-Documents/TechStack/software-developement-patterns.md`](../Project-Documents/TechStack/software-developement-patterns.md) (+ `references/behavioral.md` for Strategy).
+
+| Concern | Location |
+| ------- | -------- |
+| Package entry / exports | `api/app/agent/workflows/` |
+| Metadata registry (`WorkflowMeta`, prompts, escalate, `delivery_hint`) | `api/app/agent/workflows/registry.py` |
+| Ordered classifier rules (Chain-of-rules / Strategy) | `api/app/agent/workflows/rules.py` |
+| Tools-node Strategy map | `api/app/agent/workflows/tool_strategies.py` |
+| Intent helpers (PDF / rename / advise cues) | `api/app/agent/workflows/intents.py` |
+| Slack post-agent DeliveryStrategy map | `api/app/slack/delivery/` (`strategies.py`) |
+
+### How to add a workflow Strategy
+
+1. Add the name to `WorkflowName` in `api/app/agent/state.py`.
+2. Register `WorkflowMeta` in `registry.py` (description, `prompt_key`, escalate, `delivery_hint`).
+3. Add an ordered classifier rule in `rules.py` (do **not** extend a monolithic regex ladder in `route`).
+4. Register a `ToolStrategy` in `tool_strategies.py` (or reuse RAG / meeting / report strategies) and a compose prompt in `prompts.py`.
+5. If Slack side effects differ (PDF upload, rename, library confirm), register a DeliveryStrategy under `api/app/slack/delivery/` and point `delivery_hint` at it.
+
+New capability = new registration. Keep the LangGraph shell (`route → tools → compose`) and Slack pipeline stages stable.
+
+### Slack delivery Strategies
+
+After the agent run, `reply_pipeline` resolves a DeliveryStrategy via `resolve_delivery_strategy` / workflow `delivery_hint`:
+
+| Strategy | Typical workflows | Effect |
+| -------- | ----------------- | ------ |
+| `DefaultPostStrategy` | `qa`, summarize, status, meetings, report, … | `chat.postMessage` (+ Sources) |
+| `PdfUploadStrategy` | `file_pdf_export` | Upload PDF to channel / thread |
+| `RenameDeliveryStrategy` | `file_rename` | Slack file title update |
+| `LibraryConfirmStrategy` | `workflow_store` / list / copy / edit | Deterministic confirmations |
+| `AdviseDeliveryStrategy` | `workflow_advise` | Advice reply (file-grounded) |
+
+Map: `DELIVERY_STRATEGIES` in `api/app/slack/delivery/strategies.py`. File helpers live under `api/app/slack/files/` (not inside the delivery Strategies).
+
 ## Org agent settings (Sprint 19.1)
 
-`GET` / `PATCH /agent/config` — display name (`extra.display_name`), `system_prompt`, channel `allowlist`. Schedules remain on `/jobs/.../schedule`. Portal UI: `/app/agent` — see `docs/portal.md`.
+`GET` / `PATCH /agent/config` — display name (`extra.display_name`), `system_prompt`, channel `allowlist`. Schedules: `GET` / `PATCH /agent/schedules` (unified Strategy-validated write; legacy `/jobs/.../schedule` adapters remain). Kind Strategies live in `api/app/schedules/kinds.py` (`SCHEDULE_KIND_STRATEGIES`); persistence in `api/app/schedules/store.py`. Portal UI: `/app/agent` — see `docs/portal.md` / `docs/celery.md`.
 
 Scheduled digests use a **report subgraph** (`tools → compose`, no route) via `run_report` — see below.
 
@@ -112,7 +149,7 @@ print(run_report(
 
 Tenant schedule fields + Beat posting land in Tasks 17.2–17.3.
 
-Configure per tenant via `GET`/`PATCH /jobs/recurring-report/schedule` (`enabled`, `channel_id`, `cadence`, `window_label`) — see `docs/celery.md`.
+Configure per tenant via `GET`/`PATCH /agent/schedules` (`slack_history_sync` + `recurring_report` blocks) — legacy `GET`/`PATCH /jobs/recurring-report/schedule` still works. See `docs/celery.md` / `docs/portal.md`.
 
 Force or schedule a post: `POST /jobs/recurring-report` or Beat (`worker.dispatch_recurring_reports` → `worker.recurring_report`). Path: prefer channel sync → `run_report` → direct `chat.postMessage`. Failures mark `jobs` (`kind=recurring_report`) and record a `job` usage event; successes record `report_post`.
 
@@ -131,12 +168,14 @@ Triggers: “start onboarding”, “begin client onboarding”, “onboarding p
 
 ## Slack live path (Sprint 14)
 
-`POST /slack/events` (mention / DM) → install-store token → budget gate → `run_agent` → `chat.postMessage`.
+`POST /slack/events` (mention / DM) → install-store token → Gate → Intake → RunAgent → Deliver (`chat.postMessage` / PDF / rename / library confirm).
 
 | Piece | Module |
 | ----- | ------ |
 | Event filter + question + thread key | `api/app/slack/echo.py` |
-| Entitlement gate + invoke + post | `api/app/slack/agent_reply.py` |
+| Public entry + entitlement helpers | `api/app/slack/agent_reply.py` |
+| Pipeline stages (Gate → Deliver) | `api/app/slack/reply_pipeline.py` |
+| Post-agent DeliveryStrategy map | `api/app/slack/delivery/` |
 | Answer + Sources formatting | `api/app/slack/formatting.py` |
 
 - Mentions reply **in-thread** (`thread_ts` = existing thread or mention `ts`).
@@ -204,6 +243,9 @@ Expect `hedge=False`, at least one retrieved chunk, and a grounded stub answer c
 ## Modules
 
 - `api/app/agent/state.py`, `graph.py`, `run.py`, `checkpointer.py`, `policy.py`, `llm.py`, `guardrails.py`, `prompts.py`
-- `api/app/agent/nodes/{route,retrieve,compose}.py`
-- `api/app/agent/routes.py` — `POST /agent/dry-run`
-- `api/app/slack/agent_reply.py` — Slack mention/DM → agent
+- `api/app/agent/workflows/` — registry, classifier rules, tool Strategies (see **Workflow registry & Strategies** above)
+- `api/app/agent/nodes/{route,retrieve,compose,tools}.py`
+- `api/app/agent/routes.py` — `POST /agent/dry-run`, config / schedules
+- `api/app/slack/agent_reply.py` — Slack mention/DM orchestration entry
+- `api/app/slack/reply_pipeline.py` / `delivery/` — stages + swappable delivery Strategies
+- Pattern plan: `Project-Documents/review.md` · guidance: `Project-Documents/TechStack/software-developement-patterns.md`

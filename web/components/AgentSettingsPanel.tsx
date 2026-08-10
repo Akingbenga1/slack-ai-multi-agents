@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -32,13 +32,14 @@ async function loadConfig(
   accessToken: string,
   tenantId: string | null,
 ): Promise<AgentConfig> {
-  const res = await fetch(`${getApiBaseUrl()}/agent/config`, {
-    headers: apiAuthHeaders(accessToken, tenantId),
+  const cfg = await apiClient.get<AgentConfig>("/agent/config", {
+    accessToken,
+    clientId: tenantId,
   });
-  if (!res.ok) {
-    throw new Error((await res.text()) || res.statusText);
+  if (!cfg) {
+    throw new Error("Empty agent config response");
   }
-  return (await res.json()) as AgentConfig;
+  return cfg;
 }
 
 export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
@@ -100,21 +101,15 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
         .split(/[\n,]+/)
         .map((c) => c.trim())
         .filter(Boolean);
-      const res = await fetch(`${getApiBaseUrl()}/agent/config`, {
-        method: "PATCH",
-        headers: {
-          ...apiAuthHeaders(accessToken, tenantId),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      await apiClient.patch("/agent/config", {
+        accessToken,
+        clientId: tenantId,
+        json: {
           name,
           system_prompt: prompt,
           allowlist: { channels },
-        }),
+        },
       });
-      if (!res.ok) {
-        throw new Error((await res.text()) || res.statusText);
-      }
       setSaved("Agent details saved.");
       await refresh();
     } catch (err) {
@@ -131,21 +126,6 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
     setError(null);
     setSaved(null);
     try {
-      const headers = {
-        ...apiAuthHeaders(accessToken, tenantId),
-        "Content-Type": "application/json",
-      };
-      const syncRes = await fetch(
-        `${getApiBaseUrl()}/jobs/slack-history-sync/schedule`,
-        {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify({ enabled: syncEnabled }),
-        },
-      );
-      if (!syncRes.ok) {
-        throw new Error((await syncRes.text()) || syncRes.statusText);
-      }
       const reportBody: Record<string, unknown> = {
         enabled: reportEnabled,
         cadence,
@@ -156,17 +136,14 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
       } else {
         reportBody.clear_channel = true;
       }
-      const reportRes = await fetch(
-        `${getApiBaseUrl()}/jobs/recurring-report/schedule`,
-        {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify(reportBody),
+      await apiClient.patch("/agent/schedules", {
+        accessToken,
+        clientId: tenantId,
+        json: {
+          slack_history_sync: { enabled: syncEnabled },
+          recurring_report: reportBody,
         },
-      );
-      if (!reportRes.ok) {
-        throw new Error((await reportRes.text()) || reportRes.statusText);
-      }
+      });
       setSaved("Schedules saved.");
       await refresh();
     } catch (err) {

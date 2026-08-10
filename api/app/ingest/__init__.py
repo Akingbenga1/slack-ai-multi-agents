@@ -1,6 +1,7 @@
 """Slack history / document ingest — shared schema + format parsers."""
 
 from api.app.ingest.chunk import MessageChunk, chunk_message, chunk_messages
+from api.app.ingest.chunks_ingest import DEFAULT_EMBED_BATCH, ingest_chunks
 from api.app.ingest.document_pipeline import (
     DocumentIngestResult,
     ingest_document_units,
@@ -20,6 +21,7 @@ from api.app.ingest.schema import NormalizedMessage, SourceFormat
 from api.app.ingest.upload_ingest import UploadIngestResult, ingest_upload
 
 __all__ = [
+    "DEFAULT_EMBED_BATCH",
     "DocumentFormat",
     "DocumentIngestResult",
     "DocumentUnit",
@@ -33,6 +35,7 @@ __all__ = [
     "chunk_message",
     "chunk_messages",
     "extract_document",
+    "ingest_chunks",
     "ingest_document_units",
     "ingest_extracted_document",
     "ingest_messages",

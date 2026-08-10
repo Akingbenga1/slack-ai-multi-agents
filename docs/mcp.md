@@ -39,13 +39,14 @@ Missing / blank `client_id` → tool error (`TenantFilterRequired`).
 
 | Path | Role |
 | ---- | ---- |
-| `mcp_server/server.py` | `create_mcp()` + `main()` stdio entry |
+| `mcp_server/server.py` | `create_mcp()` (table-driven `add_tool`) + `main()` stdio entry |
 | `mcp_server/__main__.py` | `python -m mcp_server` |
+| `mcp_server/tools/grounded.py` | `run_grounded_draft` Template Method + `hit_as_citation` (Sprint 27) |
 | `mcp_server/tools/search.py` | `search_knowledge` wrapper |
-| `mcp_server/tools/draft.py` | `draft_meeting_brief` helper |
-| `mcp_server/tools/agenda.py` | `draft_meeting_agenda` helper |
-| `mcp_server/tools/notes.py` | `draft_meeting_notes` helper |
-| `mcp_server/tools/report.py` | `draft_report` helper |
+| `mcp_server/tools/draft.py` | `draft_meeting_brief` outline Strategy |
+| `mcp_server/tools/agenda.py` | `draft_meeting_agenda` outline Strategy |
+| `mcp_server/tools/notes.py` | `draft_meeting_notes` outline Strategy |
+| `mcp_server/tools/report.py` | `draft_report` outline Strategy |
 | `mcp_server/tools/onboarding.py` | `start_onboarding` stub |
 | `mcp_server/tools/rename.py` | `rename_slack_file` (Sprint 23) |
 | `mcp_server/tools/workflow.py` | `get_workflow_template` + `advise_workflow` (Sprint 24) |
@@ -63,7 +64,7 @@ Uses in-memory MCP transport + stub search (no Qdrant/TEI).
 
 ## LangGraph (Task 15.4 / 16.2–16.4 / 17.1 / 18.1)
 
-Agent graph: **route → tools → compose**. The **tools** node calls this process as an MCP **client** (`api/app/agent/mcp_client.py`) — not an in-process import of `search_knowledge`.
+Agent graph: **route → tools → compose**. The **tools** node uses `invoke_mcp` in `api/app/agent/mcp_client.py` (Adapter) — not N duplicated `*_via_mcp` transports. Typed helpers remain for call-site clarity.
 
 - Default Q&A / coordination: MCP `search_knowledge`
 - `meeting_brief` workflow: MCP `draft_meeting_brief` (outline + citations; compose may polish)
@@ -73,13 +74,17 @@ Agent graph: **route → tools → compose**. The **tools** node calls this proc
 - `onboarding` workflow: MCP `start_onboarding` (deterministic “not configured” stub; no RAG)
 
 ```bash
-# Default: spawn stdio MCP per tool call (current interpreter)
+# Default: MCP tools via in-process FastMCP (API/worker)
 # AGENT_RETRIEVE_BACKEND=mcp
+# AGENT_MCP_TRANSPORT=in_process
 
-# Escape hatch (tests / debugging): in-process retrieval
+# Opt-in: spawn stdio MCP per tool call (external / debugging)
+# AGENT_MCP_TRANSPORT=stdio
+
+# Escape hatch (tests / debugging): skip MCP, in-process retrieval only
 # AGENT_RETRIEVE_BACKEND=direct
 
-# Optional launch override
+# Optional stdio launch override
 # AGENT_MCP_COMMAND=C:\path\to\python.exe
 # AGENT_MCP_ARGS=-m mcp_server
 ```

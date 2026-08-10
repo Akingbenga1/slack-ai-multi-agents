@@ -1,4 +1,8 @@
-"""Persist Slack installs: team_id → tenant (client_id)."""
+"""Persist Slack installs: team_id → tenant (client_id).
+
+Also owns install/token → ``SlackWebClient`` factory helpers (Sprint 26.3 Adapter).
+``SlackWebClient`` itself stays HTTP-only in ``client.py``.
+"""
 
 from __future__ import annotations
 
@@ -76,3 +80,38 @@ def upsert_install(
     else:
         db.flush()
     return row
+
+
+def client_for_team(
+    db: Session,
+    settings: Settings,
+    team_id: str,
+    **client_kwargs: Any,
+) -> "SlackWebClient":
+    """Resolve install by Slack team_id and return an HTTP ``SlackWebClient``."""
+    from api.app.slack.client import SlackWebClient
+
+    install = get_install_by_team(db, team_id)
+    if install is None:
+        raise ValueError(f"No Slack install for team_id={team_id}")
+    return SlackWebClient(get_bot_token(install, settings), **client_kwargs)
+
+
+def client_for_tenant(
+    db: Session,
+    settings: Settings,
+    tenant_id: UUID,
+    **client_kwargs: Any,
+) -> "SlackWebClient":
+    """Resolve install by tenant and return an HTTP ``SlackWebClient``."""
+    from api.app.slack.client import SlackWebClient
+
+    install = get_install_by_tenant(db, tenant_id)
+    if install is None:
+        raise ValueError(f"No Slack install for tenant_id={tenant_id}")
+    return SlackWebClient(get_bot_token(install, settings), **client_kwargs)
+
+
+# Back-compat aliases (pre–Sprint 26 names lived on ``client``)
+slack_client_for_team = client_for_team
+slack_client_for_tenant = client_for_tenant

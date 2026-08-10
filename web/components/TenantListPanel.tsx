@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { FormEvent, useState } from "react";
+import { ApiError, apiClient } from "@/lib/api";
+import { useAuthenticatedResource } from "@/lib/useAuthenticatedResource";
 
 export type TenantSummary = {
   id: string;
@@ -22,9 +23,6 @@ type Props = {
 };
 
 export function TenantListPanel({ accessToken }: Props) {
-  const [tenants, setTenants] = useState<TenantSummary[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -32,50 +30,36 @@ export function TenantListPanel({ accessToken }: Props) {
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [activatePlan, setActivatePlan] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!accessToken) {
-      setError("Not signed in");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${getApiBaseUrl()}/admin/tenants`, {
-        headers: apiAuthHeaders(accessToken, null),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(
-          typeof data.detail === "string"
-            ? data.detail
-            : `Failed to load tenants (${res.status})`,
-        );
-        setTenants([]);
-        return;
-      }
-      setTenants(Array.isArray(data.tenants) ? data.tenants : []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
-      setTenants([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken]);
+  const {
+    data: tenants,
+    error: loadError,
+    busy: loading,
+    reload: load,
+  } = useAuthenticatedResource(
+    accessToken,
+    async (token) => {
+      const data = await apiClient.get<{ tenants: TenantSummary[] }>(
+        "/admin/tenants",
+        { accessToken: token, clientId: null },
+      );
+      return Array.isArray(data?.tenants) ? data.tenants : [];
+    },
+  );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const error = actionError || loadError;
+  const tenantList = tenants || [];
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     if (!accessToken) {
-      setError("Not signed in");
+      setActionError("Not signed in");
       return;
     }
     setCreating(true);
     setCreateMsg(null);
-    setError(null);
+    setActionError(null);
     try {
       const body: Record<string, unknown> = {
         name: name.trim(),
@@ -86,29 +70,20 @@ export function TenantListPanel({ accessToken }: Props) {
       if (adminPassword.trim()) {
         body.admin_password = adminPassword.trim();
       }
-      const res = await fetch(`${getApiBaseUrl()}/admin/tenants`, {
-        method: "POST",
-        headers: {
-          ...apiAuthHeaders(accessToken, null),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
+      const data = await apiClient.post<{
+        tenant?: { id?: string; slug?: string };
+        admin_password?: string;
+      }>("/admin/tenants", {
+        accessToken,
+        clientId: null,
+        json: body,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(
-          typeof data.detail === "string"
-            ? data.detail
-            : `Create failed (${res.status})`,
-        );
-        return;
-      }
-      const tid = data.tenant?.id as string | undefined;
-      const pwd = data.admin_password as string | undefined;
+      const tid = data?.tenant?.id;
+      const pwd = data?.admin_password;
       setCreateMsg(
         pwd
-          ? `Created ${data.tenant?.slug}. Generated password: ${pwd} (save now).`
-          : `Created ${data.tenant?.slug}${tid ? ` (${tid})` : ""}.`,
+          ? `Created ${data?.tenant?.slug}. Generated password: ${pwd} (save now).`
+          : `Created ${data?.tenant?.slug}${tid ? ` (${tid})` : ""}.`,
       );
       setName("");
       setSlug("");
@@ -117,7 +92,13 @@ export function TenantListPanel({ accessToken }: Props) {
       setActivatePlan(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Create failed");
+      setActionError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Create failed",
+      );
     } finally {
       setCreating(false);
     }
@@ -211,10 +192,10 @@ export function TenantListPanel({ accessToken }: Props) {
           {error}
         </p>
       ) : null}
-      {!error && tenants.length === 0 && !loading ? (
+      {!error && tenantList.length === 0 && !loading && tenants !== undefined ? (
         <p>No tenants yet.</p>
       ) : null}
-      {tenants.length > 0 ? (
+      {tenantList.length > 0 ? (
         <table
           style={{
             width: "100%",
@@ -233,7 +214,7 @@ export function TenantListPanel({ accessToken }: Props) {
             </tr>
           </thead>
           <tbody>
-            {tenants.map((t) => (
+            {tenantList.map((t) => (
               <tr key={t.id} style={{ borderBottom: "1px solid #eee" }}>
                 <td style={{ padding: "0.45rem" }}>
                   <Link href={`/admin/tenants/${t.id}`}>

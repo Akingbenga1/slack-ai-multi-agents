@@ -10,10 +10,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.app.auth.deps import require_tenant_access
+from api.app.auth.tenant_resolve import resolve_tenant_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.session import get_db
 from api.app.settings import Settings, get_settings
-from api.app.tenant import get_client_id
 from api.app.workflows.library import (
     MSG_FORBIDDEN_EDIT,
     MSG_NOT_FOUND,
@@ -67,32 +67,10 @@ class EditDraftRequest(BaseModel):
 
 
 def _resolve_tenant(principal: AuthPrincipal) -> str:
-    from_ctx = get_client_id() or principal.tenant_id
-    if principal.all_access or principal.role == "platform_owner":
-        if not from_ctx:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="tenant_id required (X-Client-Id)",
-            )
-        try:
-            return str(UUID(str(from_ctx)))
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid tenant id",
-            ) from exc
-    if not from_ctx:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Org user has no tenant membership",
-        )
-    try:
-        return str(UUID(str(from_ctx)))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
-        ) from exc
+    return resolve_tenant_for_principal(
+        principal,
+        missing_detail="tenant_id required (X-Client-Id)",
+    )
 
 
 @router.get("", response_model=WorkflowListResponse)

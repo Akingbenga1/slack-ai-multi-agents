@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -35,22 +35,14 @@ export function PlatformHealthPanel({ accessToken }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/admin/health?hours=24`, {
-        headers: apiAuthHeaders(accessToken, null),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(
-          typeof payload.detail === "string"
-            ? payload.detail
-            : `Health failed (${res.status})`,
-        );
-        setData(null);
-        return;
-      }
-      setData(payload as HealthPayload);
+      const payload = await apiClient.get<HealthPayload>(
+        "/admin/health?hours=24",
+        { accessToken, clientId: null },
+      );
+      setData(payload);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
+      setData(null);
     } finally {
       setLoading(false);
     }

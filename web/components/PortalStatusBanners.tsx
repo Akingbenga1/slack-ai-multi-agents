@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -49,18 +49,22 @@ export function PortalStatusBanners({ accessToken, tenantId }: Props) {
       return;
     }
     let cancelled = false;
-    const headers = apiAuthHeaders(accessToken, tenantId);
+    const opts = { accessToken, clientId: tenantId };
     Promise.allSettled([
-      fetch(`${getApiBaseUrl()}/billing/customers/me`, { headers }),
-      fetch(`${getApiBaseUrl()}/slack/connection`, { headers }),
-      fetch(`${getApiBaseUrl()}/jobs/slack-history-sync/status`, { headers }),
-    ]).then(async (results) => {
+      apiClient.get<BillingMe>("/billing/customers/me", {
+        ...opts,
+        allowStatuses: [404],
+      }),
+      apiClient.get<SlackConnection>("/slack/connection", opts),
+      apiClient.get<SyncStatus>("/jobs/slack-history-sync/status", opts),
+    ]).then((results) => {
       if (cancelled) return;
       const next: Banner[] = [];
 
       const billingRes = results[0];
       if (billingRes.status === "fulfilled") {
-        if (billingRes.value.status === 404) {
+        const body = billingRes.value;
+        if (body === null) {
           next.push({
             key: "unpaid",
             tone: "warn",
@@ -69,25 +73,21 @@ export function PortalStatusBanners({ accessToken, tenantId }: Props) {
             href: "/app/billing",
             linkLabel: "Go to Billing",
           });
-        } else if (billingRes.value.ok) {
-          const body = (await billingRes.value.json()) as BillingMe;
-          if ((body.plan_status || "").toLowerCase() !== "active") {
-            next.push({
-              key: "unpaid",
-              tone: "warn",
-              title: "Plan inactive",
-              body: "Your organisation plan is not active. Pay via Stripe Checkout to enable the agent.",
-              href: "/app/billing",
-              linkLabel: "Go to Billing",
-            });
-          }
+        } else if ((body.plan_status || "").toLowerCase() !== "active") {
+          next.push({
+            key: "unpaid",
+            tone: "warn",
+            title: "Plan inactive",
+            body: "Your organisation plan is not active. Pay via Stripe Checkout to enable the agent.",
+            href: "/app/billing",
+            linkLabel: "Go to Billing",
+          });
         }
       }
 
       const slackRes = results[1];
-      if (slackRes.status === "fulfilled" && slackRes.value.ok) {
-        const body = (await slackRes.value.json()) as SlackConnection;
-        if (!body.connected) {
+      if (slackRes.status === "fulfilled" && slackRes.value) {
+        if (!slackRes.value.connected) {
           next.push({
             key: "slack",
             tone: "warn",
@@ -100,8 +100,8 @@ export function PortalStatusBanners({ accessToken, tenantId }: Props) {
       }
 
       const syncRes = results[2];
-      if (syncRes.status === "fulfilled" && syncRes.value.ok) {
-        const body = (await syncRes.value.json()) as SyncStatus;
+      if (syncRes.status === "fulfilled" && syncRes.value) {
+        const body = syncRes.value;
         const failAt = body.last_failure?.finished_at
           ? Date.parse(body.last_failure.finished_at)
           : 0;

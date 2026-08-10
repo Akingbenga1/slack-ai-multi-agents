@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -30,14 +30,11 @@ export function IngestJobsPanel({ accessToken, tenantId, refreshKey = 0 }: Props
       setJobs(null);
       return;
     }
-    const res = await fetch(`${getApiBaseUrl()}/uploads/jobs?limit=20`, {
-      headers: apiAuthHeaders(accessToken, tenantId),
-    });
-    if (!res.ok) {
-      throw new Error((await res.text()) || res.statusText);
-    }
-    const body = (await res.json()) as { jobs: IngestJob[] };
-    setJobs(body.jobs || []);
+    const body = await apiClient.get<{ jobs: IngestJob[] }>(
+      "/uploads/jobs?limit=20",
+      { accessToken, clientId: tenantId },
+    );
+    setJobs(body?.jobs || []);
   }, [accessToken, tenantId]);
 
   useEffect(() => {

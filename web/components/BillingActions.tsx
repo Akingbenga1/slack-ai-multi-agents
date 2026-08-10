@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiAuthHeaders, getApiBaseUrl } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 type Props = {
   accessToken: string | null;
@@ -23,38 +23,11 @@ async function postSession(
   accessToken: string,
   tenantId: string | null,
 ): Promise<string> {
-  const headers = {
-    ...apiAuthHeaders(accessToken, tenantId),
-    "Content-Type": "application/json",
-  };
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "POST",
-    headers,
+  const payload = await apiClient.post<{ url?: string }>(path, {
+    accessToken,
+    clientId: tenantId,
   });
-  const text = await res.text();
-  let payload: unknown = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    payload = text;
-  }
-  if (!res.ok) {
-    const detail =
-      typeof payload === "object" &&
-      payload !== null &&
-      "detail" in payload &&
-      typeof (payload as { detail: unknown }).detail === "string"
-        ? (payload as { detail: string }).detail
-        : text || res.statusText;
-    throw new Error(detail);
-  }
-  const url =
-    typeof payload === "object" &&
-    payload !== null &&
-    "url" in payload &&
-    typeof (payload as { url: unknown }).url === "string"
-      ? (payload as { url: string }).url
-      : null;
+  const url = payload?.url;
   if (!url) {
     throw new Error("API returned no Checkout/Portal URL");
   }
@@ -65,16 +38,11 @@ async function fetchBillingMe(
   accessToken: string,
   tenantId: string | null,
 ): Promise<BillingCustomer | null> {
-  const headers = apiAuthHeaders(accessToken, tenantId);
-  const res = await fetch(`${getApiBaseUrl()}/billing/customers/me`, { headers });
-  if (res.status === 404) {
-    return null;
-  }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || res.statusText);
-  }
-  return (await res.json()) as BillingCustomer;
+  return apiClient.get<BillingCustomer>("/billing/customers/me", {
+    accessToken,
+    clientId: tenantId,
+    allowStatuses: [404],
+  });
 }
 
 export function BillingActions({

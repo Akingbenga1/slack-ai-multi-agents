@@ -13,10 +13,9 @@ from pathlib import Path
 from fpdf import FPDF
 
 from api.app.logging_config import get_logger
+from api.app.uploads.storage import sanitize_filename
 
 logger = get_logger("api.slack.pdf_export")
-
-_SAFE_STEM = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class _AnalysisPDF(FPDF):
@@ -28,9 +27,14 @@ class _AnalysisPDF(FPDF):
 
 
 def sanitize_pdf_stem(name: str) -> str:
-    stem = Path(name).stem.strip() or "analysis"
-    cleaned = _SAFE_STEM.sub("_", stem).strip("._") or "analysis"
-    return cleaned[:80]
+    """Stem for PDF filenames — reuses uploads ``sanitize_filename`` alphabet."""
+    raw = (name or "").strip()
+    if not raw:
+        return "analysis"
+    stem_raw = Path(raw).stem.strip() or "analysis"
+    cleaned = sanitize_filename(stem_raw)
+    stem = Path(cleaned).stem.strip("._") or "analysis"
+    return stem[:80]
 
 
 def analysis_to_pdf_bytes(

@@ -1,4 +1,8 @@
-"""Slack Web API client for live history sync (conversations.list / history)."""
+"""Slack Web API client — HTTP Adapter only (conversations / files).
+
+Install/token resolution lives in ``api.app.slack.store``
+(``client_for_tenant`` / ``client_for_team``). Legacy re-exports below.
+"""
 
 from __future__ import annotations
 
@@ -12,11 +16,6 @@ from sqlalchemy.orm import Session
 
 from api.app.logging_config import get_logger
 from api.app.settings import Settings
-from api.app.slack.store import (
-    get_bot_token,
-    get_install_by_team,
-    get_install_by_tenant,
-)
 
 logger = get_logger("api.slack.client")
 
@@ -369,10 +368,10 @@ def slack_client_for_team(
     team_id: str,
     **client_kwargs: Any,
 ) -> SlackWebClient:
-    install = get_install_by_team(db, team_id)
-    if install is None:
-        raise ValueError(f"No Slack install for team_id={team_id}")
-    return SlackWebClient(get_bot_token(install, settings), **client_kwargs)
+    """Deprecated path — prefer ``store.client_for_team``."""
+    from api.app.slack.store import client_for_team
+
+    return client_for_team(db, settings, team_id, **client_kwargs)
 
 
 def slack_client_for_tenant(
@@ -381,10 +380,10 @@ def slack_client_for_tenant(
     tenant_id: UUID,
     **client_kwargs: Any,
 ) -> SlackWebClient:
-    install = get_install_by_tenant(db, tenant_id)
-    if install is None:
-        raise ValueError(f"No Slack install for tenant_id={tenant_id}")
-    return SlackWebClient(get_bot_token(install, settings), **client_kwargs)
+    """Deprecated path — prefer ``store.client_for_tenant``."""
+    from api.app.slack.store import client_for_tenant
+
+    return client_for_tenant(db, settings, tenant_id, **client_kwargs)
 
 
 def _stringify_params(params: dict[str, Any] | None) -> dict[str, str]:

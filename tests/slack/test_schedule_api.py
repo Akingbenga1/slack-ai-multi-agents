@@ -1,8 +1,8 @@
-"""API tests for Slack history sync enqueue + schedule (Task 9.4)."""
+"""API tests for Slack history sync enqueue + schedule (Task 9.4 / 28.4)."""
 
 from __future__ import annotations
 
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,31 +12,20 @@ from api.app.db.session import get_db
 from api.app.main import app
 from api.app.membership import DEMO_ADMIN_ID, DEMO_OWNER_ID, DEMO_TENANT_ID
 from api.app.settings import Settings, get_settings
+from tests.schedules.helpers import FakeScheduleDB, MemorySchedules
+
+
 class _FakeAsync:
     id = "sync-task-1"
 
 
-class _ScheduleStore:
-    """In-memory stand-in for schedule helpers used by GET/PATCH."""
-
-    def __init__(self):
-        self.enabled: dict[UUID, bool] = {}
-
-    def is_enabled(self, _db, tenant_id: UUID) -> bool:
-        return self.enabled.get(tenant_id, True)
-
-    def set_enabled(self, _db, *, tenant_id: UUID, enabled: bool):
-        self.enabled[tenant_id] = enabled
-        return object()
+@pytest.fixture
+def schedules() -> MemorySchedules:
+    return MemorySchedules()
 
 
 @pytest.fixture
-def schedule_store() -> _ScheduleStore:
-    return _ScheduleStore()
-
-
-@pytest.fixture
-def client(schedule_store: _ScheduleStore, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(schedules: MemorySchedules, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     settings = Settings(jwt_secret="test-secret-at-least-32-chars-long!")
     monkeypatch.setattr(
         "api.app.jobs.routes.enqueue_slack_history_sync",
@@ -44,11 +33,11 @@ def client(schedule_store: _ScheduleStore, monkeypatch: pytest.MonkeyPatch) -> T
     )
     monkeypatch.setattr(
         "api.app.jobs.routes.is_slack_history_sync_enabled",
-        schedule_store.is_enabled,
+        schedules.is_slack_history_sync_enabled,
     )
     monkeypatch.setattr(
         "api.app.jobs.routes.set_slack_history_sync_enabled",
-        schedule_store.set_enabled,
+        schedules.set_slack_history_sync_enabled,
     )
     monkeypatch.setattr(
         "api.app.jobs.routes.require_budget",
@@ -117,7 +106,7 @@ def test_enqueue_returns_task_id(client: TestClient):
     assert body["kind"] == "slack_history_sync"
 
 
-def test_schedule_get_and_patch(client: TestClient, schedule_store: _ScheduleStore):
+def test_schedule_get_and_patch(client: TestClient, schedules: MemorySchedules):
     headers = {"Authorization": f"Bearer {_token()}"}
     res = client.get("/jobs/slack-history-sync/schedule", headers=headers)
     assert res.status_code == 200
@@ -130,7 +119,7 @@ def test_schedule_get_and_patch(client: TestClient, schedule_store: _ScheduleSto
     )
     assert res.status_code == 200
     assert res.json()["enabled"] is False
-    assert schedule_store.enabled[DEMO_TENANT_ID] is False
+    assert schedules.is_slack_history_sync_enabled(None, DEMO_TENANT_ID) is False
 
     res = client.get("/jobs/slack-history-sync/schedule", headers=headers)
     assert res.json()["enabled"] is False
@@ -142,15 +131,13 @@ def test_dispatch_enqueues_due_tenants(monkeypatch: pytest.MonkeyPatch):
     t1, t2 = uuid4(), uuid4()
     enqueued: list[str] = []
 
-    class FakeDB:
-        def close(self):
-            return None
+    from worker import tenant_job as tenant_job_mod
 
-    monkeypatch.setattr(worker_tasks, "session_scope", lambda: FakeDB())
+    monkeypatch.setattr(tenant_job_mod, "session_scope", lambda: FakeScheduleDB())
     monkeypatch.setattr(
         worker_tasks,
-        "list_tenants_for_scheduled_slack_sync",
-        lambda _db: [t1, t2],
+        "list_due_for_kind",
+        lambda _db, _key: [t1, t2],
     )
 
     class _R:
@@ -163,7 +150,6 @@ def test_dispatch_enqueues_due_tenants(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(worker_tasks, "enqueue_slack_history_sync", fake_enqueue)
 
-    # Celery bind=True tasks need request.id — call underlying run
     result = worker_tasks.dispatch_slack_history_syncs.run()
     assert result["count"] == 2
     assert enqueued == [str(t1), str(t2)]
