@@ -186,8 +186,8 @@ def test_beat_lists_respect_entitlements(monkeypatch: pytest.MonkeyPatch):
         },
     )
     monkeypatch.setattr(
-        "api.app.schedules.kinds.tenant_has_entitlement",
-        lambda *_a, **_k: False,
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda *_a, **_k: set(),
     )
     assert sync_sched.list_tenants_for_scheduled_slack_sync(db) == []
     assert report_sched.list_tenants_for_scheduled_reports(db) == []

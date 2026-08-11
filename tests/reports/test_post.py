@@ -30,6 +30,30 @@ def test_post_recurring_report_direct_channel(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         post_mod,
+        "claim_recurring_report_period",
+        lambda *_a, **_k: (
+            True,
+            "2026-W33",
+            {
+                "enabled": True,
+                "channel_id": "C_REPORT",
+                "cadence": "weekly",
+                "window_label": "last 7 days",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        post_mod,
+        "release_recurring_report_period_claim",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        post_mod,
+        "mark_recurring_report_posted",
+        lambda *_a, **_k: {"period": "2026-W33", "last_posted_at": "x"},
+    )
+    monkeypatch.setattr(
+        post_mod,
         "get_install_by_tenant",
         lambda _db, _tid: _FakeInstall(),
     )
@@ -87,6 +111,30 @@ def test_post_continues_when_sync_fails(monkeypatch: pytest.MonkeyPatch):
         },
     )
     monkeypatch.setattr(
+        post_mod,
+        "claim_recurring_report_period",
+        lambda *_a, **_k: (
+            True,
+            "2026-08-10",
+            {
+                "enabled": True,
+                "channel_id": "C1",
+                "cadence": "daily",
+                "window_label": "last 24 hours",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        post_mod,
+        "release_recurring_report_period_claim",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        post_mod,
+        "mark_recurring_report_posted",
+        lambda *_a, **_k: {"period": "2026-08-10", "last_posted_at": "x"},
+    )
+    monkeypatch.setattr(
         post_mod, "get_install_by_tenant", lambda *_a, **_k: _FakeInstall()
     )
     monkeypatch.setattr(post_mod, "get_bot_token", lambda *_a, **_k: "xoxb-test")
@@ -110,6 +158,7 @@ def test_post_continues_when_sync_fails(monkeypatch: pytest.MonkeyPatch):
     )
     assert out["sync"]["attempted"] is True
     assert out["sync"]["ok"] is False
+    assert out["sync"]["stale"] is True
     assert out["slack_ts"] == "1.0"
 
 

@@ -31,15 +31,21 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
 class TenantRateLimitMiddleware(BaseHTTPMiddleware):
     """
-    Enforce per-tenant RPM when request context has a `client_id` (X-Client-Id).
+    Enforce per-tenant RPM for authenticated requests with a tenant context.
 
     Must run inside TenantContextMiddleware so context is set.
-    Routes that resolve tenant later (Slack Events) call `check_tenant_rate_limit` themselves.
+    Unauthenticated callers cannot burn a tenant's RPM via forged X-Client-Id.
+    Routes that resolve tenant later (Slack Events) call `check_tenant_rate_limit`
+    themselves and are exempt via ``RATE_LIMIT_EXEMPT_PREFIXES``.
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         path = request.url.path
         if is_rate_limit_exempt(path):
+            return await call_next(request)
+
+        auth = (request.headers.get("Authorization") or "").strip()
+        if not auth.lower().startswith("bearer "):
             return await call_next(request)
 
         client_id = get_client_id()

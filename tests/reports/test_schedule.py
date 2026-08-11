@@ -97,8 +97,8 @@ def test_list_tenants_requires_enabled_channel(monkeypatch: pytest.MonkeyPatch):
         },
     )
     monkeypatch.setattr(
-        "api.app.schedules.kinds.tenant_has_entitlement",
-        lambda *_a, **_k: True,
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda _db, ids, _flag: set(ids),
     )
     due = sched.list_tenants_for_scheduled_reports(db)
     assert len(due) == 1
@@ -121,7 +121,33 @@ def test_list_tenants_skips_unentitled(monkeypatch: pytest.MonkeyPatch):
         },
     )
     monkeypatch.setattr(
-        "api.app.schedules.kinds.tenant_has_entitlement",
-        lambda *_a, **_k: False,
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda *_a, **_k: set(),
     )
     assert sched.list_tenants_for_scheduled_reports(db) == []
+
+
+def test_list_tenants_skips_already_posted_period(monkeypatch: pytest.MonkeyPatch):
+    from datetime import datetime, timezone
+
+    from api.app.schedules.kinds import period_key_for_cadence
+
+    t_ok = uuid4()
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=timezone.utc)
+    period = period_key_for_cadence("weekly", when=now)
+    db = FakeScheduleDB(install_tenant_ids=[t_ok])
+    block = report_block(enabled=True, channel_id="C1", cadence="weekly")
+    block["last_posted_period"] = period
+    db.seed(t_ok, {sched.SCHEDULE_KEY: block})
+    monkeypatch.setattr(
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda _db, ids, _flag: set(ids),
+    )
+    from api.app.schedules.kinds import list_due_recurring_reports
+
+    assert list_due_recurring_reports(db, now=now) == []
+    # Next week still due
+    later = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+    due = list_due_recurring_reports(db, now=later)
+    assert len(due) == 1
+    assert due[0]["tenant_id"] == t_ok

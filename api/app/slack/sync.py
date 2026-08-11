@@ -136,9 +136,39 @@ def _sync_channel(
     )
     _, latest = bounds_from_watermark(row)
 
-    messages = []
+    batch_size = max(
+        1, int(getattr(settings, "slack_sync_ingest_batch_size", 100) or 100)
+    )
+    batch: list[Any] = []
     batch_oldest: str | None = None
     batch_latest: str | None = None
+    channel_oldest: str | None = None
+    channel_latest: str | None = None
+    total_messages = 0
+    total_chunks = 0
+    saw_any = False
+
+    def _flush() -> None:
+        nonlocal batch, batch_oldest, batch_latest, total_messages, total_chunks
+        nonlocal channel_oldest, channel_latest
+        if not batch:
+            return
+        ingest_result: IngestResult = ingest_fn(
+            client_id=str(tenant_id),
+            messages=batch,
+            settings=settings,
+        )
+        total_messages += ingest_result.message_count
+        total_chunks += ingest_result.chunk_count
+        channel_oldest = ts_min(channel_oldest, batch_oldest)
+        channel_latest = ts_max(channel_latest, batch_latest)
+        # Memory-bound only: do NOT advance durable ``latest`` here.
+        # conversations.history is newest-first; committing mid-stream would
+        # skip older messages if a later batch fails.
+        batch = []
+        batch_oldest = None
+        batch_latest = None
+
     for raw in slack.conversations_history(channel_id, oldest=latest):
         msg = normalize_slack_message(
             raw,
@@ -147,11 +177,14 @@ def _sync_channel(
         )
         if msg is None:
             continue
-        messages.append(msg)
+        saw_any = True
+        batch.append(msg)
         batch_oldest = ts_min(batch_oldest, msg.ts)
         batch_latest = ts_max(batch_latest, msg.ts)
+        if len(batch) >= batch_size:
+            _flush()
 
-    if not messages:
+    if not saw_any:
         # Touch last_synced_at even when idle so status API can show progress later.
         upsert_watermark(
             db,
@@ -161,23 +194,20 @@ def _sync_channel(
         )
         return ChannelSyncResult(channel_id=channel_id, skipped=True)
 
-    ingest_result: IngestResult = ingest_fn(
-        client_id=str(tenant_id),
-        messages=messages,
-        settings=settings,
-    )
+    _flush()
+    # Commit high-water mark only after the full pull + all ingest batches.
     upsert_watermark(
         db,
         tenant_id=tenant_id,
         channel_id=channel_id,
         source=SOURCE_SLACK_LIVE,
-        oldest=batch_oldest,
-        latest=batch_latest,
+        oldest=channel_oldest,
+        latest=channel_latest,
     )
     return ChannelSyncResult(
         channel_id=channel_id,
-        message_count=ingest_result.message_count,
-        chunk_count=ingest_result.chunk_count,
-        oldest=batch_oldest,
-        latest=batch_latest,
+        message_count=total_messages,
+        chunk_count=total_chunks,
+        oldest=channel_oldest,
+        latest=channel_latest,
     )

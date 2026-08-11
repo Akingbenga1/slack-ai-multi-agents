@@ -244,17 +244,20 @@ def recurring_report_task(
     channel_id: Optional[str] = None,
     window_label: Optional[str] = None,
     prefer_sync: bool = True,
+    force: bool = False,
     priority: int = 0,
 ) -> dict[str, Any]:
     """
     Generate a recurring digest and post it directly to the configured channel.
 
     Prefers a fresh Slack sync for the target channel before ``run_report``.
-    No draft-approval gate.
+    No draft-approval gate. Beat path uses ``force=False`` (period idempotent);
+    on-demand API enqueue sets ``force=True``.
     """
     logger.info(
-        "recurring_report channel=%s",
+        "recurring_report channel=%s force=%s",
         channel_id or "(from schedule)",
+        force,
     )
     post_result = post_recurring_report(
         ctx.db,
@@ -262,15 +265,20 @@ def recurring_report_task(
         channel_id=channel_id,
         window_label=window_label,
         prefer_sync=prefer_sync,
+        force=force,
         settings=get_settings(),
         record_usage=True,
     )
+    if post_result.get("skipped"):
+        ctx.set_usage(skip=True)
+        return post_result
     ctx.set_usage(
         meta={
             "kind": KIND_RECURRING_REPORT,
             "job_id": str(ctx.job.id),
             "channel_id": post_result.get("channel_id"),
             "hedge": post_result.get("hedge"),
+            "period": post_result.get("period"),
         }
     )
     logger.info(
@@ -286,6 +294,7 @@ def enqueue_recurring_report(
     channel_id: Optional[str] = None,
     window_label: Optional[str] = None,
     prefer_sync: bool = True,
+    force: bool = False,
     priority: int = 0,
 ) -> Any:
     """Enqueue a forced or scheduled recurring report post."""
@@ -295,6 +304,7 @@ def enqueue_recurring_report(
             "channel_id": channel_id,
             "window_label": window_label,
             "prefer_sync": prefer_sync,
+            "force": force,
             "priority": priority,
         },
         **enqueue_options(client_id=client_id, priority=priority),

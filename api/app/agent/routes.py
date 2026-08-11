@@ -19,7 +19,6 @@ from api.app.auth.tokens import AuthPrincipal
 from api.app.db.session import get_db
 from api.app.logging_config import get_logger
 from api.app.schedules import patch_schedules, read_all_kinds
-from api.app.tenant import get_client_id
 
 logger = get_logger("api.agent.routes")
 
@@ -222,22 +221,8 @@ def agent_dry_run(
 
     Uses stub LLM when `ANTHROPIC_API_KEY` is unset.
     """
-    _ = principal
     _ = db  # session ensures DB is up; usage recorded inside run_agent
-    client_id = get_client_id()
-    if not client_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant context required",
-        )
-    try:
-        UUID(str(client_id))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid tenant id",
-        ) from exc
-
+    client_id = resolve_tenant_uuid_for_principal(principal)
     from api.app.agent.run import run_agent
 
     try:

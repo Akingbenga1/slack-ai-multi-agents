@@ -75,7 +75,7 @@ def stage_gate(
     check_agent_entitlement: Callable[..., tuple[bool, str]],
     check_file_job_entitlement: Callable[..., tuple[bool, str]],
 ) -> ReplyPipelineContext:
-    """Entitlement / jobs_daily gate; denial posts and early-return."""
+    """Entitlement / jobs_daily / channel allowlist gate; denial posts and early-return."""
     assert ctx.db is not None
     allowed, denial = check_agent_entitlement(ctx.db, ctx.tenant_id)
     if not allowed:
@@ -93,13 +93,15 @@ def stage_gate(
         ctx.early_return = {"ok": True, "denied": True, "reason": denial}
         return ctx
 
-    if ctx.pre_workflow in FILE_HEAVY_WORKFLOWS:
+    # Gate any attachment intake/download path, not only PDF/rename/store.
+    if ctx.pre_workflow in FILE_HEAVY_WORKFLOWS or ctx.has_file_refs:
         ok_job, job_denial = check_file_job_entitlement(ctx.db, ctx.tenant_id)
         if not ok_job:
             logger.info(
-                "slack_file_job_denied tenant_id=%s workflow=%s",
+                "slack_file_job_denied tenant_id=%s workflow=%s has_files=%s",
                 ctx.tenant_id,
                 ctx.pre_workflow,
+                ctx.has_file_refs,
             )
             ctx.post(
                 bot_token=ctx.bot_token,
@@ -113,7 +115,56 @@ def stage_gate(
                 "reason": job_denial,
                 "workflow": ctx.pre_workflow,
             }
+            return ctx
+
+    allow_denial = _channel_allowlist_denial(ctx)
+    if allow_denial:
+        logger.info(
+            "slack_channel_not_allowed tenant_id=%s channel=%s",
+            ctx.tenant_id,
+            ctx.channel,
+        )
+        ctx.post(
+            bot_token=ctx.bot_token,
+            channel=ctx.channel,
+            text=allow_denial,
+            thread_ts=ctx.thread_ts,
+        )
+        ctx.early_return = {
+            "ok": True,
+            "denied": True,
+            "reason": allow_denial,
+            "workflow": ctx.pre_workflow,
+        }
     return ctx
+
+
+def _channel_allowlist_denial(ctx: ReplyPipelineContext) -> str | None:
+    """Empty/missing allowlist = allow all; non-empty list must include channel."""
+    assert ctx.db is not None
+    try:
+        from api.app.agent.config_store import agent_settings_dict
+
+        settings_payload = agent_settings_dict(ctx.db, ctx.tenant_id)
+        allow = settings_payload.get("allowlist") or {}
+        channels = allow.get("channels") if isinstance(allow, dict) else None
+        if not channels:
+            return None
+        allowed = {str(c).strip() for c in channels if str(c).strip()}
+        if not allowed:
+            return None
+        if ctx.channel in allowed:
+            return None
+        return (
+            "This channel is not on the organisation allowlist. "
+            "Ask an admin to add it in the org portal agent settings."
+        )
+    except Exception:
+        logger.exception(
+            "slack_allowlist_check_failed tenant_id=%s",
+            ctx.tenant_id,
+        )
+        return None
 
 
 def stage_intake(ctx: ReplyPipelineContext) -> ReplyPipelineContext:

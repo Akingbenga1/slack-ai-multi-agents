@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AuthenticatedResourceState<T> = {
   /** `undefined` while loading; `null` when missing token or failed. */
@@ -13,6 +13,7 @@ export type AuthenticatedResourceState<T> = {
 /**
  * Optional load/error/busy helper for portal panels (Sprint 30.2).
  * Loader is skipped when `accessToken` is null.
+ * Uses a generation counter so stale responses never overwrite newer loads.
  */
 export function useAuthenticatedResource<T>(
   accessToken: string | null | undefined,
@@ -22,51 +23,62 @@ export function useAuthenticatedResource<T>(
   const [data, setData] = useState<T | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const generationRef = useRef(0);
+  const loaderRef = useRef(loader);
+  loaderRef.current = loader;
 
   const reload = useCallback(async () => {
+    const gen = ++generationRef.current;
     if (!accessToken) {
-      setData(null);
-      setError(null);
+      if (gen === generationRef.current) {
+        setData(null);
+        setError(null);
+        setBusy(false);
+      }
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const next = await loader(accessToken);
+      const next = await loaderRef.current(accessToken);
+      if (gen !== generationRef.current) return;
       setData(next);
     } catch (err) {
+      if (gen !== generationRef.current) return;
       setData(null);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      if (gen === generationRef.current) setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deps passed explicitly
   }, [accessToken, ...deps]);
 
   useEffect(() => {
-    let cancelled = false;
+    const gen = ++generationRef.current;
     setData(undefined);
     if (!accessToken) {
       setData(null);
+      setBusy(false);
       return;
     }
     setBusy(true);
     setError(null);
-    loader(accessToken)
+    loaderRef.current(accessToken)
       .then((next) => {
-        if (!cancelled) setData(next);
+        if (gen !== generationRef.current) return;
+        setData(next);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setData(null);
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        if (gen !== generationRef.current) return;
+        setData(null);
+        setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
-        if (!cancelled) setBusy(false);
+        if (gen === generationRef.current) setBusy(false);
       });
     return () => {
-      cancelled = true;
+      // Invalidate in-flight resolution without bumping generation for reload.
+      generationRef.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deps passed explicitly
   }, [accessToken, ...deps]);

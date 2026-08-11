@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
+import pytest
+
 from api.app.ingest import SourceFormat
 from api.app.ingest.pipeline import IngestResult
 from api.app.slack.sync import sync_slack_history
@@ -140,3 +142,59 @@ def test_sync_empty_channel_skips_ingest(monkeypatch):
     assert calls["n"] == 0
     assert result.channels[0].skipped is True
     assert (tenant_id, SOURCE_SLACK_LIVE, "C2") in db.rows
+
+
+def test_sync_ingests_in_batches(monkeypatch):
+    from api.app.settings import Settings
+
+    tenant_id = uuid4()
+    db = FakeDB()
+    history = {
+        "C1": [
+            {"type": "message", "user": "U1", "text": f"m{i}", "ts": f"{100 + i}.0"}
+            for i in range(5)
+        ]
+    }
+    client = FakeSlackClient(channels=[{"id": "C1"}], history=history)
+    monkeypatch.setattr(
+        "api.app.slack.sync.get_watermark",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "api.app.slack.watermarks.get_watermark",
+        lambda *_a, **_k: None,
+    )
+
+    ingest_sizes: list[int] = []
+
+    def fake_ingest(*, client_id, messages, settings=None, **_kwargs):
+        msgs = list(messages)
+        ingest_sizes.append(len(msgs))
+        # Watermark must not advance until the full channel pull finishes.
+        assert (tenant_id, SOURCE_SLACK_LIVE, "C1") not in db.rows
+        return IngestResult(
+            client_id=client_id, message_count=len(msgs), chunk_count=len(msgs)
+        )
+
+    settings = Settings(slack_sync_ingest_batch_size=2)
+    result = sync_slack_history(
+        db,
+        tenant_id=tenant_id,
+        channel_ids=["C1"],
+        client=client,
+        ingest_fn=fake_ingest,
+        settings=settings,
+    )
+    assert result.message_count == 5
+    assert ingest_sizes == [2, 2, 1]
+    row = db.rows[(tenant_id, SOURCE_SLACK_LIVE, "C1")]
+    _, latest = bounds_from_watermark(row)
+    assert latest == "104.0"
+
+
+def test_download_rejects_non_slack_host():
+    from api.app.slack.client import SlackApiError, SlackWebClient
+
+    client = SlackWebClient("xoxb-test", sleep=lambda _: None)
+    with pytest.raises(SlackApiError, match="download_host_not_allowed"):
+        client.download_file("https://evil.example/steal")

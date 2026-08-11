@@ -25,7 +25,6 @@ from api.app.billing.plans import require_entitlement
 from api.app.db.session import get_db
 from api.app.governance.budgets import require_budget
 from api.app.settings import Settings, get_settings
-from api.app.tenant import get_client_id
 from api.app.uploads.roles import FileRole
 from api.app.uploads.status import get_ingest_job_by_upload_id, list_ingest_jobs
 from api.app.uploads.storage import StoredUpload, store_upload
@@ -89,13 +88,7 @@ def list_upload_ingest_jobs(
     limit: int = 20,
 ) -> IngestJobListResponse:
     """Recent ingest_upload jobs for the caller's tenant."""
-    _ = principal
-    client_id = get_client_id() or principal.tenant_id
-    if not client_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant context required",
-        )
+    client_id = _resolve_tenant(principal, None)
     tid = UUID(str(client_id))
     jobs = list_ingest_jobs(db, tid, limit=limit)
     return IngestJobListResponse(
@@ -111,13 +104,7 @@ def upload_ingest_status(
     db: Annotated[Session, Depends(get_db)],
 ) -> IngestJobResponse:
     """Status for the latest ingest job for an upload_id (tenant-scoped)."""
-    _ = principal
-    client_id = get_client_id() or principal.tenant_id
-    if not client_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant context required",
-        )
+    client_id = _resolve_tenant(principal, None)
     tid = UUID(str(client_id))
     row = get_ingest_job_by_upload_id(db, tid, upload_id)
     if row is None:

@@ -76,12 +76,47 @@ def _tenant_id_from_stmt(stmt: Any) -> UUID | None:
     return None
 
 
+def _in_values_from_stmt(stmt: Any, column_key: str) -> list[Any] | None:
+    """Extract IN-list values for ``column_key`` from a SQLAlchemy select."""
+    wheres = getattr(stmt, "_where_criteria", ()) or ()
+    for crit in wheres:
+        found = _clause_in_values(crit, column_key)
+        if found is not None:
+            return found
+    whereclause = getattr(stmt, "whereclause", None)
+    if whereclause is not None:
+        return _clause_in_values(whereclause, column_key)
+    return None
+
+
+def _clause_in_values(clause: Any, column_key: str) -> list[Any] | None:
+    if isinstance(clause, BooleanClauseList):
+        for child in clause.clauses:
+            found = _clause_in_values(child, column_key)
+            if found is not None:
+                return found
+        return None
+    if isinstance(clause, Grouping):
+        return _clause_in_values(clause.element, column_key)
+    # BinaryExpression for IN: left.key == column, right is BindParameter/list
+    if isinstance(clause, BinaryExpression):
+        left = clause.left
+        if getattr(left, "key", None) != column_key:
+            return None
+        right = clause.right
+        value = getattr(right, "value", right)
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+    return None
+
+
 class FakeScheduleDB:
     """
     Minimal Session stand-in for ``ScheduleStore`` AgentConfig CRUD + install listing.
 
     ``scalar`` resolves ``AgentConfig`` by ``tenant_id`` in the SELECT WHERE clause.
-    ``scalars`` returns Slack-install candidate tenant ids for Beat due-lists.
+    ``scalars`` returns Slack-install candidate tenant ids for Beat due-lists,
+    or AgentConfig rows when the statement selects configs (bulk load).
     """
 
     def __init__(
@@ -114,7 +149,22 @@ class FakeScheduleDB:
             return next(iter(self.configs.values()))
         return None
 
-    def scalars(self, _stmt: Any) -> SimpleNamespace:
+    def scalars(self, stmt: Any) -> SimpleNamespace:
+        in_tenants = _in_values_from_stmt(stmt, "tenant_id")
+        if in_tenants is not None:
+            rows = [
+                self.configs[t]
+                for t in in_tenants
+                if isinstance(t, UUID) and t in self.configs
+            ]
+            # Also accept string UUIDs from binds
+            if not rows:
+                rows = [
+                    self.configs[UUID(str(t))]
+                    for t in in_tenants
+                    if UUID(str(t)) in self.configs
+                ]
+            return SimpleNamespace(all=lambda: rows)
         return SimpleNamespace(all=lambda: list(self.install_tenant_ids))
 
     def add(self, row: Any) -> None:

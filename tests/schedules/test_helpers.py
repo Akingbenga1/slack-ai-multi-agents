@@ -42,8 +42,8 @@ def test_list_due_for_kind_uses_seeded_blocks(monkeypatch: pytest.MonkeyPatch):
     db.seed(t_on, {SLACK_HISTORY_SYNC_KEY: sync_block(enabled=True)})
     db.seed(t_off, {SLACK_HISTORY_SYNC_KEY: sync_block(enabled=False)})
     monkeypatch.setattr(
-        "api.app.schedules.kinds.tenant_has_entitlement",
-        lambda *_a, **_k: True,
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda _db, ids, _flag: set(ids),
     )
     assert list_due_for_kind(db, SLACK_HISTORY_SYNC_KEY) == [t_on]
 

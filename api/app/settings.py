@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # Optional override for stdio MCP launch (default: current python -m mcp_server)
     agent_mcp_command: str = ""
     agent_mcp_args: str = ""
+    # Hard deadline for one MCP tool call (in-process or stdio)
+    agent_mcp_timeout_seconds: float = 60.0
+    # Cap retrieve/tool top-k to bound Qdrant payload memory
+    agent_retrieve_max_top_k: int = 32
+    # Keep at most this many checkpointed messages per thread (human+AI turns)
+    agent_max_checkpoint_messages: int = 40
 
     # Slack (Sprint 4+)
     slack_client_id: str = ""
@@ -55,6 +61,8 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""
     # Sprint 9.4 — Beat interval for live history sync dispatcher (seconds)
     slack_history_sync_interval_seconds: float = 3600.0
+    # Bound in-memory backlog while syncing a channel (messages per ingest batch)
+    slack_sync_ingest_batch_size: int = 100
     # Sprint 17.3 — Beat intervals for recurring report dispatchers (seconds)
     recurring_report_daily_interval_seconds: float = 86400.0
     recurring_report_weekly_interval_seconds: float = 604800.0

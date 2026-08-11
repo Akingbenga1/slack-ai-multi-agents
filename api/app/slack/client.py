@@ -21,6 +21,25 @@ logger = get_logger("api.slack.client")
 
 SLACK_API_BASE = "https://slack.com/api"
 
+# Private file downloads must stay on Slack CDN hosts (SSRF / token exfil).
+_SLACK_DOWNLOAD_HOST_SUFFIXES: tuple[str, ...] = (
+    "files.slack.com",
+    "slack-files.com",
+    "slack.com",
+)
+
+
+def _slack_download_url_allowed(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https",):
+        return False
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return False
+    return any(host == suffix or host.endswith("." + suffix) for suffix in _SLACK_DOWNLOAD_HOST_SUFFIXES)
+
 
 class SlackApiError(RuntimeError):
     """Slack Web API returned ok=false or an unexpected response."""
@@ -201,16 +220,81 @@ class SlackWebClient:
             raise ValueError("file_id is required")
         return self.api_call("files.info", params={"file": file_id})
 
-    def download_file(self, url: str) -> bytes:
-        """Download a private Slack file URL with the bot token."""
+    def download_file(self, url: str, *, max_bytes: int | None = None) -> bytes:
+        """Download a private Slack file URL with the bot token (size-capped)."""
         if not url:
             raise ValueError("url is required")
+        if not _slack_download_url_allowed(url):
+            raise SlackApiError(
+                "download_host_not_allowed",
+                method="files.download",
+                response={"url": url[:200]},
+            )
+        # Align with upload API default (50 MiB) to avoid worker/API OOM.
+        limit = 50 * 1024 * 1024 if max_bytes is None else int(max_bytes)
+        if limit <= 0:
+            raise ValueError("max_bytes must be positive")
         headers = {"Authorization": f"Bearer {self.bot_token}"}
         last_retry_after = 1.0
         for attempt in range(self.max_retries + 1):
             try:
-                with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+                # No blind redirects: re-validate Location against Slack hosts.
+                with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
                     resp = client.get(url, headers=headers)
+                    redirects = 0
+                    while resp.status_code in (301, 302, 303, 307, 308) and redirects < 3:
+                        location = resp.headers.get("Location") or ""
+                        if not _slack_download_url_allowed(location):
+                            raise SlackApiError(
+                                "download_redirect_not_allowed",
+                                method="files.download",
+                                response={"location": location[:200]},
+                            )
+                        resp = client.get(location, headers=headers)
+                        redirects += 1
+
+                    if resp.status_code == 429 or resp.status_code >= 500:
+                        last_retry_after = _retry_after_seconds(resp)
+                        if attempt >= self.max_retries:
+                            raise SlackRateLimitError(
+                                method="files.download",
+                                retry_after=last_retry_after,
+                            )
+                        self._sleep(last_retry_after)
+                        continue
+
+                    if resp.status_code >= 400:
+                        raise SlackApiError(
+                            f"http_{resp.status_code}",
+                            method="files.download",
+                            response={"body": resp.text[:300]},
+                        )
+
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length is not None:
+                        try:
+                            if int(content_length) > limit:
+                                raise SlackApiError(
+                                    "file_too_large",
+                                    method="files.download",
+                                    response={
+                                        "content_length": content_length,
+                                        "max_bytes": limit,
+                                    },
+                                )
+                        except ValueError:
+                            pass
+
+                    content = resp.content
+                    if len(content) > limit:
+                        raise SlackApiError(
+                            "file_too_large",
+                            method="files.download",
+                            response={"max_bytes": limit, "read_bytes": len(content)},
+                        )
+                    return content
+            except SlackApiError:
+                raise
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 if attempt >= self.max_retries:
                     raise SlackApiError(
@@ -221,24 +305,6 @@ class SlackWebClient:
                 delay = min(8.0, 0.5 * (2**attempt))
                 self._sleep(delay)
                 continue
-
-            if resp.status_code == 429 or resp.status_code >= 500:
-                last_retry_after = _retry_after_seconds(resp)
-                if attempt >= self.max_retries:
-                    raise SlackRateLimitError(
-                        method="files.download",
-                        retry_after=last_retry_after,
-                    )
-                self._sleep(last_retry_after)
-                continue
-
-            if resp.status_code >= 400:
-                raise SlackApiError(
-                    f"http_{resp.status_code}",
-                    method="files.download",
-                    response={"body": resp.text[:300]},
-                )
-            return resp.content
 
         raise SlackRateLimitError(
             method="files.download", retry_after=last_retry_after

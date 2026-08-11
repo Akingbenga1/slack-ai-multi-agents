@@ -89,10 +89,46 @@ def store_upload(
     )
 
 
-def resolve_stored_path(upload_root: Path, relative_path: str) -> Path:
-    """Resolve a stored relative path; reject path escape."""
+def normalize_relative_path(relative_path: str) -> str:
+    """Normalize and reject absolute / ``..`` segments (fail-closed)."""
+    rel = (relative_path or "").replace("\\", "/").strip()
+    if not rel or rel.startswith("/"):
+        raise ValueError("invalid upload path")
+    parts = Path(rel).parts
+    if ".." in parts or any(p in ("", ".") for p in parts):
+        raise ValueError("invalid upload path")
+    return "/".join(parts)
+
+
+def resolve_stored_path(
+    upload_root: Path,
+    relative_path: str,
+    *,
+    client_id: str | None = None,
+) -> Path:
+    """
+    Resolve a stored relative path; reject path escape.
+
+    When ``client_id`` is set, also require the path to live under that
+    tenant's upload directory (blocks ``{cid}/../{other}/file``).
+    Uses ``Path.is_relative_to`` — not ``str.startswith`` — so siblings like
+    ``uploads`` vs ``uploads_evil`` cannot bypass the root check.
+    """
     root = Path(upload_root).resolve()
-    target = (root / relative_path).resolve()
-    if not str(target).startswith(str(root)):
+    rel = normalize_relative_path(relative_path)
+    if client_id is not None:
+        cid = str(client_id).strip()
+        if not cid:
+            raise ValueError("client_id is required")
+        if rel != cid and not rel.startswith(f"{cid}/"):
+            raise ValueError("stored path is not under this tenant")
+        tenant_root = (root / cid).resolve()
+        target = (root / rel).resolve()
+        if not target.is_relative_to(tenant_root):
+            raise ValueError("invalid upload path")
+        return target
+
+    target = (root / rel).resolve()
+    if not target.is_relative_to(root):
         raise ValueError("invalid upload path")
     return target

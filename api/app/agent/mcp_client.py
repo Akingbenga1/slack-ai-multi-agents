@@ -7,12 +7,14 @@ FastMCP for API/worker; stdio remains for external clients / opt-in.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Optional
+from uuid import UUID
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -21,6 +23,7 @@ from mcp.types import CallToolResult
 from api.app.logging_config import get_logger
 from api.app.retrieval.types import KnowledgeCitation, KnowledgeSearchResult
 from api.app.settings import Settings, get_settings
+from api.app.tenant import get_client_id
 
 logger = get_logger("api.agent.mcp_client")
 
@@ -31,6 +34,17 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Cached FastMCP for in-process transport (one process-local Adapter instance).
 _in_process_mcp: Any | None = None
+_mcp_sync_pool: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _sync_mcp_pool() -> concurrent.futures.ThreadPoolExecutor:
+    global _mcp_sync_pool
+    if _mcp_sync_pool is None:
+        _mcp_sync_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4,
+            thread_name_prefix="mcp-sync",
+        )
+    return _mcp_sync_pool
 
 
 def mcp_server_params(
@@ -89,17 +103,26 @@ async def call_mcp_tool_async(
         return await call_tool(name, arguments)
 
     settings = settings or get_settings()
+    timeout = float(getattr(settings, "agent_mcp_timeout_seconds", 60.0) or 60.0)
     transport = _mcp_transport(settings)
-    if transport in ("in_process", "inprocess", "local"):
-        app = _in_process_server()
-        return await app.call_tool(name, arguments)
 
-    params = server or mcp_server_params(settings)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(name, arguments)
-            return result
+    async def _invoke() -> CallToolResult | Any:
+        if transport in ("in_process", "inprocess", "local"):
+            app = _in_process_server()
+            return await app.call_tool(name, arguments)
+
+        params = server or mcp_server_params(settings)
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool(name, arguments)
+
+    try:
+        return await asyncio.wait_for(_invoke(), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(
+            f"MCP tool {name!r} timed out after {timeout:.1f}s"
+        ) from exc
 
 
 def call_mcp_tool(
@@ -110,16 +133,75 @@ def call_mcp_tool(
     server: StdioServerParameters | None = None,
     call_tool: Optional[McpCallTool] = None,
 ) -> CallToolResult | Any:
-    """Sync wrapper for LangGraph sync nodes."""
-    return asyncio.run(
-        call_mcp_tool_async(
-            name,
-            arguments,
-            settings=settings,
-            server=server,
-            call_tool=call_tool,
-        )
+    """Sync wrapper for LangGraph sync nodes (running-loop safe)."""
+    settings = settings or get_settings()
+    timeout = float(getattr(settings, "agent_mcp_timeout_seconds", 60.0) or 60.0)
+    coro = call_mcp_tool_async(
+        name,
+        arguments,
+        settings=settings,
+        server=server,
+        call_tool=call_tool,
     )
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # Already inside an event loop — bridge via a shared worker pool.
+    future = _sync_mcp_pool().submit(asyncio.run, coro)
+    try:
+        return future.result(timeout=timeout + 5.0)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        raise TimeoutError(
+            f"MCP tool {name!r} sync bridge timed out after {timeout + 5.0:.1f}s"
+        ) from exc
+
+
+def _assert_mcp_client_id(arguments: dict[str, Any]) -> None:
+    """Fail-closed when tool args disagree with request/task tenant context."""
+    raw = arguments.get("client_id")
+    if not raw:
+        return
+    ctx = (get_client_id() or "").strip()
+    bound = (os.environ.get("MCP_BOUND_CLIENT_ID") or "").strip()
+    expected = ctx or bound
+    if not expected:
+        return
+    try:
+        if str(UUID(str(raw))) != str(UUID(expected)):
+            raise PermissionError(
+                f"MCP client_id mismatch: tool={raw!r} context={expected!r}"
+            )
+    except ValueError as exc:
+        raise PermissionError(f"Invalid MCP client_id: {raw!r}") from exc
+
+
+def invoke_mcp(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    settings: Settings | None = None,
+    call_tool: Optional[McpCallTool] = None,
+    server: StdioServerParameters | None = None,
+) -> dict[str, Any]:
+    """
+    Thin Adapter: call one MCP tool and return its structured payload.
+
+    Tool Strategies / typed helpers should use this (or a thin wrapper) and
+    must not own transport details.
+    """
+    _assert_mcp_client_id(arguments)
+    logger.info("mcp_call_tool name=%s", name)
+    raw = call_mcp_tool(
+        name,
+        arguments,
+        settings=settings,
+        server=server,
+        call_tool=call_tool,
+    )
+    return tool_result_payload(raw)
 
 
 def tool_result_payload(result: Any) -> dict[str, Any]:
@@ -154,31 +236,6 @@ def _content_text(result: Any) -> str:
         if t:
             parts.append(str(t))
     return "\n".join(parts).strip()
-
-
-def invoke_mcp(
-    name: str,
-    arguments: dict[str, Any],
-    *,
-    settings: Settings | None = None,
-    call_tool: Optional[McpCallTool] = None,
-    server: StdioServerParameters | None = None,
-) -> dict[str, Any]:
-    """
-    Thin Adapter: call one MCP tool and return its structured payload.
-
-    Tool Strategies / typed helpers should use this (or a thin wrapper) and
-    must not own transport details.
-    """
-    logger.info("mcp_call_tool name=%s", name)
-    raw = call_mcp_tool(
-        name,
-        arguments,
-        settings=settings,
-        server=server,
-        call_tool=call_tool,
-    )
-    return tool_result_payload(raw)
 
 
 def citation_from_mcp_hit(hit: Mapping[str, Any]) -> KnowledgeCitation:

@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from api.app.qdrant.tenant import TenantFilterRequired, require_client_id
+from api.app.qdrant.tenant import TenantFilterRequired
 from api.app.retrieval import KnowledgeSearchFilters, search_knowledge
 from api.app.retrieval.types import KnowledgeSearchResult
 from mcp_server.serialize import search_result_to_dict
+from mcp_server.tenant_bind import require_tool_client_id
 
 SearchFn = Callable[..., KnowledgeSearchResult]
 
@@ -30,7 +31,7 @@ def search_knowledge_tool(
     Raises ``TenantFilterRequired`` / ``ValueError`` on bad input (surfaced
     by FastMCP as tool errors).
     """
-    cid = require_client_id(client_id)
+    cid = require_tool_client_id(client_id)
     text = (query or "").strip()
     if not text:
         raise ValueError("query must be non-empty")
@@ -39,10 +40,15 @@ def search_knowledge_tool(
         {"kind": kind, "channel": channel, "filename": filename}
     )
     fn = search_fn or search_knowledge
+    from api.app.settings import get_settings
+
+    max_k = int(getattr(get_settings(), "agent_retrieve_max_top_k", 32) or 32)
+    max_k = max(1, max_k)
+    capped = min(max(1, int(limit)), max_k)
     result = fn(
         client_id=cid,
         query=text,
-        limit=max(1, int(limit)),
+        limit=capped,
         filters=filters,
         **search_kwargs,
     )

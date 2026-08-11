@@ -236,7 +236,11 @@ def get_slack_history_sync_schedule(
     db: Annotated[Session, Depends(get_db)],
     tenant_id: Optional[str] = None,
 ) -> SlackHistorySyncScheduleResponse:
-    """Read whether hourly Beat will enqueue sync for the tenant."""
+    """
+    Read whether hourly Beat will enqueue sync for the tenant.
+
+    Deprecated write/read twin: prefer ``GET /agent/schedules`` (Sprint 28+).
+    """
     client_id = _resolve_enqueue_tenant(principal, tenant_id)
     enabled = is_slack_history_sync_enabled(db, UUID(client_id))
     return SlackHistorySyncScheduleResponse(client_id=client_id, enabled=enabled)
@@ -251,7 +255,11 @@ def patch_slack_history_sync_schedule(
     principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
     db: Annotated[Session, Depends(get_db)],
 ) -> SlackHistorySyncScheduleResponse:
-    """Enable or disable hourly Beat sync for the tenant (on-demand still allowed)."""
+    """
+    Enable or disable hourly Beat sync for the tenant (on-demand still allowed).
+
+    Deprecated twin write path: prefer ``PATCH /agent/schedules``.
+    """
     client_id = _resolve_enqueue_tenant(principal, body.tenant_id)
     set_slack_history_sync_enabled(db, tenant_id=UUID(client_id), enabled=body.enabled)
     return SlackHistorySyncScheduleResponse(client_id=client_id, enabled=body.enabled)
@@ -281,7 +289,11 @@ def get_recurring_report_schedule_api(
     db: Annotated[Session, Depends(get_db)],
     tenant_id: Optional[str] = None,
 ) -> RecurringReportScheduleResponse:
-    """Read recurring report channel / cadence / enable for the tenant."""
+    """
+    Read recurring report channel / cadence / enable for the tenant.
+
+    Deprecated twin: prefer ``GET /agent/schedules``.
+    """
     client_id = _resolve_enqueue_tenant(principal, tenant_id)
     sched = get_recurring_report_schedule(db, UUID(client_id))
     return RecurringReportScheduleResponse(
@@ -302,7 +314,11 @@ def patch_recurring_report_schedule_api(
     principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
     db: Annotated[Session, Depends(get_db)],
 ) -> RecurringReportScheduleResponse:
-    """Update recurring report schedule (channel + cadence + enable)."""
+    """
+    Update recurring report schedule (channel + cadence + enable).
+
+    Deprecated twin write path: prefer ``PATCH /agent/schedules``.
+    """
     client_id = _resolve_enqueue_tenant(principal, body.tenant_id)
     if body.cadence is not None:
         try:
@@ -358,6 +374,7 @@ def enqueue_tenant_recurring_report(
         channel_id=channel,
         window_label=body.window_label or sched.get("window_label"),
         prefer_sync=body.prefer_sync,
+        force=True,
         priority=body.priority,
     )
     return RecurringReportEnqueueResponse(

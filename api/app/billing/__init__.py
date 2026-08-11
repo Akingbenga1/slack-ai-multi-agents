@@ -12,6 +12,7 @@ from api.app.billing.plans import (
     plan_is_active,
     require_entitlement,
     tenant_has_entitlement,
+    tenants_with_entitlement,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "plan_is_active",
     "require_entitlement",
     "tenant_has_entitlement",
+    "tenants_with_entitlement",
 ]

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiClient } from "@/lib/api";
 
 type Props = {
@@ -43,24 +43,27 @@ export function TenantDetailPanel({ accessToken, tenantId }: Props) {
   const [tokensMonthly, setTokensMonthly] = useState("");
   const [jobsDaily, setJobsDaily] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const loadGen = useRef(0);
 
   const load = useCallback(async () => {
     if (!accessToken) {
       setError("Not signed in");
       return;
     }
+    const gen = ++loadGen.current;
     setError(null);
     try {
-      const [tData, aData] = await Promise.all([
-        apiClient.get<TenantDetail>(`/admin/tenants/${tenantId}`, {
-          accessToken,
-          clientId: tenantId,
-        }),
-        apiClient.get<{ logs: AuditRow[] }>(
-          `/admin/audit-logs?tenant_id=${encodeURIComponent(tenantId)}&limit=20`,
-          { accessToken, clientId: null },
-        ),
-      ]);
+      const tenantP = apiClient.get<TenantDetail>(`/admin/tenants/${tenantId}`, {
+        accessToken,
+        clientId: tenantId,
+      });
+      const auditP = apiClient.get<{ logs: AuditRow[] }>(
+        `/admin/audit-logs?tenant_id=${encodeURIComponent(tenantId)}&limit=20`,
+        { accessToken, clientId: null },
+      ).catch(() => null);
+
+      const [tData, aData] = await Promise.all([tenantP, auditP]);
+      if (gen !== loadGen.current) return;
       if (!tData) {
         setError("Failed to load tenant");
         setDetail(null);
@@ -73,11 +76,13 @@ export function TenantDetailPanel({ accessToken, tenantId }: Props) {
       setJobsDaily(String(ents.jobs_daily ?? ""));
       setLogs(Array.isArray(aData?.logs) ? aData.logs : []);
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(e instanceof Error ? e.message : "Request failed");
     }
   }, [accessToken, tenantId]);
 
   useEffect(() => {
+    loadGen.current += 1;
     void load();
   }, [load]);
 

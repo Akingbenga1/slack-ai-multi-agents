@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from api.app.db.models import Job
 from api.app.governance.usage import record_usage
-from api.app.membership import DEMO_TENANT_ID
 from api.app.tenant import get_client_id, set_client_id
 from worker.job_meta import (
     create_job,
@@ -34,11 +33,24 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def resolve_tenant_id(tenant_id: Optional[str] = None) -> uuid.UUID:
-    """Prefer Celery header context; fall back to kwarg / demo tenant."""
-    client_id = get_client_id() or tenant_id
+    """
+    Prefer Celery header context; fall back to explicit ``tenant_id`` kwarg.
+
+    Fail-closed: never invent a demo tenant. Beat must pass headers/kwargs
+    (see ``worker.celery_app.build_beat_schedule``). Header and kwarg must
+    agree when both are present.
+    """
+    header_id = (get_client_id() or "").strip() or None
+    kwarg_id = (str(tenant_id).strip() if tenant_id else "") or None
+    if header_id and kwarg_id and header_id != kwarg_id:
+        raise ValueError(
+            f"tenant header/kwarg mismatch: header={header_id!r} kwarg={kwarg_id!r}"
+        )
+    client_id = header_id or kwarg_id
     if not client_id:
-        client_id = str(DEMO_TENANT_ID)
-        set_client_id(client_id)
+        raise ValueError(
+            "tenant_id required (Celery client_id header or tenant_id kwarg)"
+        )
     try:
         tenant_uuid = uuid.UUID(str(client_id))
     except ValueError as exc:

@@ -13,13 +13,15 @@ from api.app.settings import Settings, get_settings
 
 logger = get_logger("api.governance.rate_limit")
 
-# Paths that never consume tenant RPM (webhooks, probes, OpenAPI).
+# Paths that never consume tenant RPM (webhooks, probes, OpenAPI, Slack Events).
 RATE_LIMIT_EXEMPT_PREFIXES: tuple[str, ...] = (
     "/health",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/billing/webhooks",
+    "/slack",
+    "/auth",
 )
 
 

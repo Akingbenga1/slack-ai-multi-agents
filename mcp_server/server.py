@@ -159,15 +159,14 @@ def create_mcp(
         new_filename: str,
         stored_relative_path: str | None = None,
         file_id: str | None = None,
-        bot_token: str | None = None,
         question: str | None = None,
     ) -> dict[str, Any]:
+        # Bot token resolved server-side from the tenant install store.
         return rename(
             client_id=client_id,
             new_filename=new_filename,
             stored_relative_path=stored_relative_path,
             file_id=file_id,
-            bot_token=bot_token,
             question=question,
         )
 
@@ -257,8 +256,8 @@ def create_mcp(
             description=(
                 "Rename a tenant-stored org copy of a Slack attachment (primary). "
                 "Optionally update Slack file title via files.edit when ``file_id`` "
-                "and ``bot_token`` are provided. Slack has no full filename rename "
-                "API. ``client_id`` is required (fail-closed)."
+                "is provided (install token resolved server-side). Slack has no full "
+                "filename rename API. ``client_id`` is required (fail-closed)."
             ),
             fn=rename_slack_file,
         ),

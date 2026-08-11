@@ -39,8 +39,8 @@ def test_list_tenants_filters_disabled(monkeypatch: pytest.MonkeyPatch):
     db.seed(t_on, {sched.SCHEDULE_KEY: sync_block(enabled=True)})
     db.seed(t_off, {sched.SCHEDULE_KEY: sync_block(enabled=False)})
     monkeypatch.setattr(
-        "api.app.schedules.kinds.tenant_has_entitlement",
-        lambda *_a, **_k: True,
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda _db, ids, _flag: set(ids),
     )
     assert sched.list_tenants_for_scheduled_slack_sync(db) == [t_on]
 
@@ -51,7 +51,7 @@ def test_list_tenants_skips_unentitled(monkeypatch: pytest.MonkeyPatch):
     db.seed(t_ok, {sched.SCHEDULE_KEY: sync_block(enabled=True)})
     db.seed(t_no, {sched.SCHEDULE_KEY: sync_block(enabled=True)})
     monkeypatch.setattr(
-        "api.app.schedules.kinds.tenant_has_entitlement",
-        lambda _db, tenant_id, _flag: tenant_id == t_ok,
+        "api.app.schedules.kinds.tenants_with_entitlement",
+        lambda _db, ids, _flag: {t_ok},
     )
     assert sched.list_tenants_for_scheduled_slack_sync(db) == [t_ok]

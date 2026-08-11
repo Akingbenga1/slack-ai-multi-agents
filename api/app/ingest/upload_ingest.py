@@ -87,19 +87,28 @@ def ingest_upload(
     """
     settings = settings or get_settings()
     role = file_role if isinstance(file_role, FileRole) else FileRole(str(file_role))
-    path = resolve_stored_path(settings.upload_dir_path, relative_path)
+    cid = str(client_id).strip()
+    if not cid:
+        raise ValueError("client_id is required")
+    # Bind path to this tenant so mismatched Celery kwargs cannot ingest
+    # another org's bytes into this collection.
+    path = resolve_stored_path(
+        settings.upload_dir_path,
+        relative_path,
+        client_id=cid,
+    )
     if not path.is_file():
         raise FileNotFoundError(f"upload not found: {relative_path}")
 
     if role is FileRole.DOCUMENT or role is FileRole.WORKFLOW:
         doc = extract_document(path, filename=filename)
         result: DocumentIngestResult = ingest_extracted_document(
-            client_id=client_id,
+            client_id=cid,
             document=doc,
             settings=settings,
         )
         return UploadIngestResult(
-            client_id=client_id,
+            client_id=cid,
             file_role=role,
             filename=filename,
             unit_or_message_count=result.unit_count,
@@ -110,12 +119,12 @@ def ingest_upload(
     if role is FileRole.SLACK_HISTORY:
         messages = _load_slack_messages(path, filename, channel)
         result_m: IngestResult = ingest_messages(
-            client_id=client_id,
+            client_id=cid,
             messages=messages,
             settings=settings,
         )
         return UploadIngestResult(
-            client_id=client_id,
+            client_id=cid,
             file_role=role,
             filename=filename,
             unit_or_message_count=result_m.message_count,

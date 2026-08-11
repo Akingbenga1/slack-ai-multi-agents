@@ -97,7 +97,9 @@ def post_message(
         data = resp.json()
 
     if not data.get("ok"):
-        logger.warning("chat.postMessage failed error=%s", data.get("error"))
+        err = data.get("error") or "chat.postMessage failed"
+        logger.warning("chat.postMessage failed error=%s", err)
+        raise RuntimeError(f"Slack post failed: {err}")
     return data
 
 

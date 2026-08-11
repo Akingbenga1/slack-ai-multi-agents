@@ -68,15 +68,43 @@ def tenant_has_entitlement(
     flag: str,
 ) -> bool:
     """Return True if the tenant's billing row grants `flag` (e.g. agent)."""
-    if tenant_is_suspended(db, tenant_id):
-        return False
-    row = db.scalar(
-        select(BillingCustomer).where(BillingCustomer.tenant_id == UUID(str(tenant_id)))
-    )
-    if row is None:
-        return False
-    ents = row.entitlements or {}
-    return bool(ents.get(flag)) and (row.plan_status or "").lower() == "active"
+    return UUID(str(tenant_id)) in tenants_with_entitlement(db, [tenant_id], flag)
+
+
+def tenants_with_entitlement(
+    db: Session,
+    tenant_ids: list[UUID | str] | tuple[UUID | str, ...] | set[UUID | str],
+    flag: str,
+) -> set[UUID]:
+    """
+    Bulk entitlement check — one billing query + one suspended-tenant query.
+
+    Used by Beat due-lists to avoid N+1 ``tenant_has_entitlement`` calls.
+    """
+    ids = [UUID(str(t)) for t in tenant_ids]
+    if not ids:
+        return set()
+    suspended = {
+        row.id
+        for row in db.scalars(
+            select(Tenant).where(
+                Tenant.id.in_(ids),
+                Tenant.status == "suspended",
+            )
+        ).all()
+    }
+    active: set[UUID] = set()
+    for row in db.scalars(
+        select(BillingCustomer).where(BillingCustomer.tenant_id.in_(ids))
+    ).all():
+        if row.tenant_id in suspended:
+            continue
+        if (row.plan_status or "").lower() != "active":
+            continue
+        ents = row.entitlements or {}
+        if bool(ents.get(flag)):
+            active.add(row.tenant_id)
+    return active
 
 
 def require_entitlement(db: Session, tenant_id: UUID | str, flag: str) -> None:

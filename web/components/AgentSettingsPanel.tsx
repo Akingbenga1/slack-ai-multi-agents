@@ -56,6 +56,39 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    setData(undefined);
+    setError(null);
+    if (!accessToken) {
+      setData(null);
+      return;
+    }
+    (async () => {
+      try {
+        const cfg = await loadConfig(accessToken, tenantId);
+        if (cancelled) return;
+        setData(cfg);
+        setName(cfg.name || "");
+        setPrompt(cfg.system_prompt || "");
+        setChannelsText((cfg.allowlist?.channels || []).join("\n"));
+        setSyncEnabled(cfg.schedules?.slack_history_sync?.enabled ?? true);
+        const report = cfg.schedules?.recurring_report;
+        setReportEnabled(report?.enabled ?? false);
+        setReportChannel(report?.channel_id || "");
+        setCadence(report?.cadence || "weekly");
+        setWindowLabel(report?.window_label || "last 7 days");
+      } catch (err) {
+        if (cancelled) return;
+        setData(null);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, tenantId]);
+
   const refresh = useCallback(async () => {
     if (!accessToken) {
       setData(null);
@@ -74,21 +107,6 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
     setCadence(report?.cadence || "weekly");
     setWindowLabel(report?.window_label || "last 7 days");
   }, [accessToken, tenantId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(undefined);
-    refresh()
-      .catch((err) => {
-        if (!cancelled) {
-          setData(null);
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh]);
 
   async function onSaveIdentity(e: FormEvent) {
     e.preventDefault();

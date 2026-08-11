@@ -346,13 +346,12 @@ def store_from_attached_evidence(
     rel = str(evidence.get("stored_relative_path") or "").strip()
     if not rel:
         raise ValueError("attachment has no stored path")
-    # Fail-closed path resolve
-    absolute = resolve_stored_path(upload_root, rel)
+    try:
+        absolute = resolve_stored_path(upload_root, rel, client_id=cid)
+    except ValueError as exc:
+        raise PermissionError(MSG_CROSS_TENANT) from exc
     if not absolute.is_file():
         raise FileNotFoundError(f"stored attachment missing: {rel}")
-    # Ensure relative path is under this tenant
-    if not rel.startswith(f"{cid}/"):
-        raise PermissionError(MSG_CROSS_TENANT)
 
     data = absolute.read_bytes()
     filename = str(evidence.get("filename") or absolute.name)
@@ -392,7 +391,11 @@ def copy_template(
         raise ValueError("owner_slack_user_id is required for copy")
 
     source = get_template(db, client_id=cid_str, template_id=template_id)
-    absolute = resolve_stored_path(upload_root, source.storage_relative_path)
+    absolute = resolve_stored_path(
+        upload_root,
+        source.storage_relative_path,
+        client_id=cid_str,
+    )
     if not absolute.is_file():
         raise FileNotFoundError("source workflow file missing on disk")
 

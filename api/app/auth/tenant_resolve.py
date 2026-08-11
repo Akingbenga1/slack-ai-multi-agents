@@ -20,12 +20,14 @@ def resolve_tenant_for_principal(
     """
     Resolve tenant ``client_id`` for an authenticated HTTP principal.
 
-    Prefer request context (``X-Client-Id`` / JWT membership via ``get_client_id``).
-    Platform owners may target ``requested_id`` (body/form override).
-    Org users are locked to membership; a mismatched override → 403.
+    Platform owners may use request context (``X-Client-Id``) or
+    ``requested_id`` (body/form override). Org users are locked to JWT
+    ``principal.tenant_id``; forged context / mismatched override → 403.
 
     Returns a normalized UUID string.
     """
+    # Context may include client-controlled X-Client-Id; platform owners may
+    # use it. Org users are locked to JWT membership (principal.tenant_id).
     from_ctx = get_client_id() or principal.tenant_id
     requested = (requested_id or "").strip() or None
     detail = missing_detail or (
@@ -47,23 +49,26 @@ def resolve_tenant_for_principal(
                 detail="Invalid tenant id",
             ) from exc
 
-    if not from_ctx:
+    if not principal.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Org user has no tenant membership",
         )
 
     try:
-        allowed = str(UUID(from_ctx))
+        allowed = str(UUID(principal.tenant_id))
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid tenant id",
         ) from exc
 
-    if requested:
+    # Optional equality checks only — never elevate via forged X-Client-Id.
+    for candidate, label in ((from_ctx, "context"), (requested, "request")):
+        if not candidate:
+            continue
         try:
-            if str(UUID(requested)) != allowed:
+            if str(UUID(candidate)) != allowed:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Cross-tenant access denied",
@@ -71,7 +76,7 @@ def resolve_tenant_for_principal(
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid tenant id",
+                detail=f"Invalid tenant id ({label})",
             ) from exc
 
     return allowed

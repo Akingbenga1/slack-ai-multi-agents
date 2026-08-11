@@ -80,6 +80,9 @@ class Membership(Base):
 
 class AgentConfig(Base):
     __tablename__ = "agent_configs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_agent_configs_tenant_name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)

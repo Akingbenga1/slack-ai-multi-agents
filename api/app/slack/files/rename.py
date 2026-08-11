@@ -91,14 +91,13 @@ def rename_stored_org_copy(
     rel = (stored_relative_path or "").strip().replace("\\", "/")
     if not rel:
         raise ValueError("stored_relative_path is required")
-    if not rel.startswith(f"{cid}/"):
-        raise ValueError("stored path is not under this tenant")
 
     safe_new = sanitize_filename(new_filename)
     if not safe_new:
         raise ValueError("new_filename is required")
 
-    absolute = resolve_stored_path(upload_root, rel)
+    # Tenant-bound resolve rejects ``..`` / cross-tenant prefixes.
+    absolute = resolve_stored_path(upload_root, rel, client_id=cid)
     if not absolute.is_file():
         raise FileNotFoundError(f"stored file missing: {rel}")
 
@@ -112,10 +111,9 @@ def rename_stored_org_copy(
 
     dest = absolute.with_name(stored_filename)
     if dest.resolve() != absolute.resolve():
-        # Reject escape even after with_name
         dest_resolved = dest.resolve()
-        root = Path(upload_root).resolve()
-        if not str(dest_resolved).startswith(str(root / cid)):
+        tenant_root = (Path(upload_root).resolve() / cid).resolve()
+        if not dest_resolved.is_relative_to(tenant_root):
             raise ValueError("rename would escape tenant upload root")
         if dest.exists():
             raise FileExistsError(f"target already exists: {stored_filename}")

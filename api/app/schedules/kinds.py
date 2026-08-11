@@ -6,12 +6,13 @@ per key; new kind = class + registry entry. Persistence stays on ScheduleStore.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from api.app.billing.plans import tenant_has_entitlement
+from api.app.billing.plans import tenants_with_entitlement
 
 Cadence = Literal["daily", "weekly"]
 
@@ -21,6 +22,11 @@ RECURRING_REPORT_KEY = "recurring_report"
 _CADENCE_WINDOWS: dict[str, str] = {
     "daily": "last 24 hours",
     "weekly": "last 7 days",
+}
+
+_ENTITLEMENT_BY_KEY: dict[str, str] = {
+    SLACK_HISTORY_SYNC_KEY: "sync",
+    RECURRING_REPORT_KEY: "agent",
 }
 
 
@@ -34,6 +40,27 @@ def normalize_cadence(value: str | None) -> Cadence:
 def window_label_for_cadence(cadence: str | None) -> str:
     key = normalize_cadence(cadence)
     return _CADENCE_WINDOWS[key]
+
+
+def period_key_for_cadence(
+    cadence: str | None,
+    when: datetime | None = None,
+) -> str:
+    """
+    Idempotency period for a Beat cadence (UTC).
+
+    daily → ``YYYY-MM-DD``; weekly → ``YYYY-Www`` (ISO week).
+    """
+    key = normalize_cadence(cadence)
+    moment = when or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    else:
+        moment = moment.astimezone(timezone.utc)
+    if key == "daily":
+        return moment.strftime("%Y-%m-%d")
+    iso = moment.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
 
 
 class ScheduleKindStrategy(Protocol):
@@ -55,6 +82,10 @@ class ScheduleKindStrategy(Protocol):
 
         Raises ``ValueError`` on invalid fields.
         """
+        ...
+
+    def block_is_due(self, block: dict[str, Any], **filters: Any) -> bool:
+        """Kind-specific due gate (no DB / entitlement)."""
         ...
 
     def is_due(
@@ -90,6 +121,10 @@ class SlackHistorySyncStrategy:
             out["enabled"] = bool(patch["enabled"])
         return out
 
+    def block_is_due(self, block: dict[str, Any], **filters: Any) -> bool:
+        _ = filters
+        return bool(self.normalize(block)["enabled"])
+
     def is_due(
         self,
         db: Session,
@@ -97,10 +132,12 @@ class SlackHistorySyncStrategy:
         block: dict[str, Any],
         **filters: Any,
     ) -> bool:
-        _ = filters
-        if not tenant_has_entitlement(db, tenant_id, "sync"):
+        entitled = filters.get("_entitled")
+        if entitled is None:
+            entitled = tenant_id in tenants_with_entitlement(db, [tenant_id], "sync")
+        if not entitled:
             return False
-        return bool(self.normalize(block)["enabled"])
+        return self.block_is_due(block, **filters)
 
 
 class RecurringReportStrategy:
@@ -133,12 +170,20 @@ class RecurringReportStrategy:
         window = str(raw.get("window_label") or "").strip() or window_label_for_cadence(
             cadence
         )
-        return {
+        out: dict[str, Any] = {
             "enabled": enabled,
             "channel_id": channel,
             "cadence": cadence,
             "window_label": window,
         }
+        # Internal Beat idempotency bookkeeping (preserved across patches).
+        last_period = raw.get("last_posted_period")
+        if last_period:
+            out["last_posted_period"] = str(last_period)
+        last_at = raw.get("last_posted_at")
+        if last_at:
+            out["last_posted_at"] = str(last_at)
+        return out
 
     def apply_patch(
         self, current: dict[str, Any], patch: dict[str, Any]
@@ -160,17 +205,13 @@ class RecurringReportStrategy:
             out["window_label"] = label or window_label_for_cadence(
                 str(out.get("cadence") or self.default_cadence)
             )
+        if patch.get("last_posted_period") is not None:
+            out["last_posted_period"] = str(patch["last_posted_period"])
+        if patch.get("last_posted_at") is not None:
+            out["last_posted_at"] = str(patch["last_posted_at"])
         return out
 
-    def is_due(
-        self,
-        db: Session,
-        tenant_id: UUID,
-        block: dict[str, Any],
-        **filters: Any,
-    ) -> bool:
-        if not tenant_has_entitlement(db, tenant_id, "agent"):
-            return False
+    def block_is_due(self, block: dict[str, Any], **filters: Any) -> bool:
         sched = self.normalize(block)
         if not sched["enabled"]:
             return False
@@ -179,7 +220,25 @@ class RecurringReportStrategy:
         cadence_filter = filters.get("cadence")
         if cadence_filter is not None and sched["cadence"] != cadence_filter:
             return False
+        now = filters.get("now")
+        period = period_key_for_cadence(sched["cadence"], when=now)
+        if sched.get("last_posted_period") == period:
+            return False
         return True
+
+    def is_due(
+        self,
+        db: Session,
+        tenant_id: UUID,
+        block: dict[str, Any],
+        **filters: Any,
+    ) -> bool:
+        entitled = filters.get("_entitled")
+        if entitled is None:
+            entitled = tenant_id in tenants_with_entitlement(db, [tenant_id], "agent")
+        if not entitled:
+            return False
+        return self.block_is_due(block, **filters)
 
 
 _SYNC = SlackHistorySyncStrategy()
@@ -203,39 +262,61 @@ def list_due_for_kind(
     key: str,
     **filters: Any,
 ) -> list[UUID]:
-    """Tenant ids due for Beat for ``key`` (store + Strategy.is_due)."""
-    from api.app.schedules.store import list_tenants_for
+    """Tenant ids due for Beat for ``key`` (bulk configs + entitlements)."""
+    from api.app.schedules.store import list_candidate_tenant_ids, load_blocks_for
 
     strategy = get_schedule_kind(key)
+    flag = _ENTITLEMENT_BY_KEY.get(key)
+    ids = list_candidate_tenant_ids(db)
+    entitled: set[UUID]
+    if flag:
+        entitled = tenants_with_entitlement(db, ids, flag)
+    else:
+        entitled = set(ids)
+    blocks = load_blocks_for(db, key, ids)
 
-    def predicate(tenant_id: UUID, block: dict[str, Any]) -> bool:
-        return strategy.is_due(db, tenant_id, block, **filters)
-
-    return list_tenants_for(db, key, predicate)
+    due: list[UUID] = []
+    for tenant_id in ids:
+        if tenant_id not in entitled:
+            continue
+        if strategy.block_is_due(blocks.get(tenant_id, {}), **filters):
+            due.append(tenant_id)
+    return due
 
 
 def list_due_recurring_reports(
     db: Session,
     *,
     cadence: Cadence | None = None,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Enriched due rows for recurring-report Beat ticks."""
     strategy = _REPORT
     filters: dict[str, Any] = {}
     if cadence is not None:
         filters["cadence"] = cadence
-    due_ids = list_due_for_kind(db, strategy.key, **filters)
-    rows: list[dict[str, Any]] = []
-    from api.app.schedules.store import get_block
+    if now is not None:
+        filters["now"] = now
+    from api.app.schedules.store import list_candidate_tenant_ids, load_blocks_for
 
-    for tenant_id in due_ids:
-        sched = strategy.normalize(get_block(db, tenant_id, strategy.key))
+    ids = list_candidate_tenant_ids(db)
+    entitled = tenants_with_entitlement(db, ids, "agent")
+    blocks = load_blocks_for(db, strategy.key, ids)
+    rows: list[dict[str, Any]] = []
+    for tenant_id in ids:
+        if tenant_id not in entitled:
+            continue
+        raw = blocks.get(tenant_id, {})
+        if not strategy.block_is_due(raw, **filters):
+            continue
+        sched = strategy.normalize(raw)
         rows.append(
             {
                 "tenant_id": tenant_id,
                 "channel_id": sched["channel_id"],
                 "cadence": sched["cadence"],
                 "window_label": sched["window_label"],
+                "period": period_key_for_cadence(sched["cadence"], when=now),
             }
         )
     return rows
@@ -253,5 +334,6 @@ __all__ = [
     "list_due_for_kind",
     "list_due_recurring_reports",
     "normalize_cadence",
+    "period_key_for_cadence",
     "window_label_for_cadence",
 ]

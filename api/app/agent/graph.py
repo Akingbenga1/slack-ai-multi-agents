@@ -21,6 +21,7 @@ from api.app.agent.nodes.compose import make_compose_node
 from api.app.agent.nodes.retrieve import SearchFn
 from api.app.agent.nodes.route import route_node
 from api.app.agent.nodes.tools import make_tools_node
+from api.app.agent.nodes.trim import make_trim_messages_node
 from api.app.agent.state import AgentState
 from api.app.settings import Settings
 
@@ -40,7 +41,7 @@ def build_agent_graph(
     """
     Build and compile the core agent graph.
 
-    Nodes: route → tools → compose.
+    Nodes: route → tools → compose → trim.
     The tools node calls bundled MCP ``search_knowledge`` by default
     (inject ``search_fn`` / ``mcp_call_tool`` in tests).
     Pass a checkpointer for thread continuity (Sprint 13.2).
@@ -69,15 +70,18 @@ def build_agent_graph(
         db_factory=resolved.db_factory,
         system_prompt=resolved.system_prompt,
     )
+    trim = make_trim_messages_node(settings=resolved.settings)
 
     graph = StateGraph(AgentState)
     graph.add_node("route", route_node)
     graph.add_node("tools", tools)
     graph.add_node("compose", compose)
+    graph.add_node("trim", trim)
     graph.add_edge(START, "route")
     graph.add_edge("route", "tools")
     graph.add_edge("tools", "compose")
-    graph.add_edge("compose", END)
+    graph.add_edge("compose", "trim")
+    graph.add_edge("trim", END)
 
     kwargs: dict[str, Any] = {}
     if resolved.checkpointer is not None:
@@ -100,7 +104,7 @@ def build_report_graph(
     """
     Report subgraph for scheduled digests (Sprint 17.1).
 
-    Nodes: tools → compose (no route — caller forces ``workflow=report``).
+    Nodes: tools → compose → trim (no route — caller forces ``workflow=report``).
     Ready for Celery Beat (17.3) to invoke via ``run_report``.
     Prefer ``deps=AgentRuntimeDeps(...)``; kwargs override or stand alone.
     """
@@ -127,13 +131,16 @@ def build_report_graph(
         db_factory=resolved.db_factory,
         system_prompt=resolved.system_prompt,
     )
+    trim = make_trim_messages_node(settings=resolved.settings)
 
     graph = StateGraph(AgentState)
     graph.add_node("tools", tools)
     graph.add_node("compose", compose)
+    graph.add_node("trim", trim)
     graph.add_edge(START, "tools")
     graph.add_edge("tools", "compose")
-    graph.add_edge("compose", END)
+    graph.add_edge("compose", "trim")
+    graph.add_edge("trim", END)
 
     kwargs: dict[str, Any] = {}
     if resolved.checkpointer is not None:

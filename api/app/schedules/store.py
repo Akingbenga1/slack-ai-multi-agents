@@ -28,9 +28,21 @@ def _load_default_config(db: Session, tenant_id: UUID) -> AgentConfig | None:
     )
 
 
-def get_block(db: Session, tenant_id: UUID, key: str) -> dict[str, Any]:
+def get_block(
+    db: Session,
+    tenant_id: UUID,
+    key: str,
+    *,
+    for_update: bool = False,
+) -> dict[str, Any]:
     """Return a copy of ``schedules[key]`` or ``{}`` when missing/invalid."""
-    config = _load_default_config(db, tenant_id)
+    stmt = select(AgentConfig).where(
+        AgentConfig.tenant_id == tenant_id,
+        AgentConfig.name == DEFAULT_AGENT_NAME,
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    config = db.scalar(stmt)
     if config is None or not config.schedules:
         return {}
     block = config.schedules.get(key)
@@ -50,9 +62,14 @@ def upsert_block(
     Write ``agent_configs.schedules[key]`` on the default agent row.
 
     When ``merge`` is True, patch onto any existing block; when False, replace
-    the key with ``block`` as-is.
+    the key with ``block`` as-is. Uses ``SELECT … FOR UPDATE`` when a row
+    already exists to reduce lost JSONB updates under concurrency.
     """
-    config = _load_default_config(db, tenant_id)
+    stmt = select(AgentConfig).where(
+        AgentConfig.tenant_id == tenant_id,
+        AgentConfig.name == DEFAULT_AGENT_NAME,
+    )
+    config = db.scalar(stmt.with_for_update())
     payload = dict(block)
     if config is None:
         config = AgentConfig(
@@ -78,6 +95,41 @@ def upsert_block(
     return config
 
 
+def list_candidate_tenant_ids(
+    db: Session,
+    *,
+    candidate_tenant_ids: Iterable[UUID] | None = None,
+) -> list[UUID]:
+    """Default Beat candidates: distinct Slack install tenants."""
+    if candidate_tenant_ids is not None:
+        return list(candidate_tenant_ids)
+    return list(db.scalars(select(SlackInstall.tenant_id).distinct()).all())
+
+
+def load_blocks_for(
+    db: Session,
+    key: str,
+    tenant_ids: Iterable[UUID],
+) -> dict[UUID, dict[str, Any]]:
+    """Bulk-load ``schedules[key]`` for many tenants (one AgentConfig query)."""
+    ids = list(tenant_ids)
+    out: dict[UUID, dict[str, Any]] = {tid: {} for tid in ids}
+    if not ids:
+        return out
+    rows = list(
+        db.scalars(
+            select(AgentConfig).where(
+                AgentConfig.tenant_id.in_(ids),
+                AgentConfig.name == DEFAULT_AGENT_NAME,
+            )
+        ).all()
+    )
+    for row in rows:
+        block = (row.schedules or {}).get(key)
+        out[row.tenant_id] = dict(block) if isinstance(block, dict) else {}
+    return out
+
+
 def list_tenants_for(
     db: Session,
     key: str,
@@ -89,15 +141,13 @@ def list_tenants_for(
     Tenants whose schedule block for ``key`` passes ``predicate``.
 
     Default candidates: distinct ``SlackInstall.tenant_id`` (Beat jobs need Slack).
+    Loads schedule blocks in one query (no per-tenant N+1).
     """
-    if candidate_tenant_ids is None:
-        ids = list(db.scalars(select(SlackInstall.tenant_id).distinct()).all())
-    else:
-        ids = list(candidate_tenant_ids)
+    ids = list_candidate_tenant_ids(db, candidate_tenant_ids=candidate_tenant_ids)
+    blocks = load_blocks_for(db, key, ids)
     due: list[UUID] = []
     for tenant_id in ids:
-        block = get_block(db, tenant_id, key)
-        if predicate(tenant_id, block):
+        if predicate(tenant_id, blocks.get(tenant_id, {})):
             due.append(tenant_id)
     return due
 
@@ -105,6 +155,8 @@ def list_tenants_for(
 __all__ = [
     "DEFAULT_AGENT_NAME",
     "get_block",
+    "list_candidate_tenant_ids",
     "list_tenants_for",
+    "load_blocks_for",
     "upsert_block",
 ]
