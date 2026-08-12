@@ -62,5 +62,5 @@ def decode_access_token(token: str, settings: Settings) -> AuthPrincipal:
         email=str(payload.get("email", "")),
         role=role,
         tenant_id=payload.get("tenant_id"),
-        all_access=bool(payload.get("all_access")) or role == "platform_owner",
+        all_access=role == "platform_owner",
     )

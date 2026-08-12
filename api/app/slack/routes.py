@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from api.app.auth.deps import require_tenant_access
+from api.app.auth.deps import require_platform_owner, require_tenant_access
 from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.models import Tenant
@@ -20,6 +20,7 @@ from api.app.logging_config import get_logger
 from api.app.settings import Settings, get_settings
 from api.app.slack.agent_reply import process_agent_reply
 from api.app.slack.echo import should_reply
+from api.app.slack.oauth_state import create_slack_oauth_state, verify_slack_oauth_state
 from api.app.slack.store import (
     get_bot_token,
     get_install_by_team,
@@ -33,14 +34,31 @@ logger = get_logger("api.slack")
 
 router = APIRouter(prefix="/slack", tags=["slack"])
 
+# Portal-facing OAuth error codes (no internal exception text in URLs).
+_OAUTH_USER_ERRORS = {
+    "slack_denied": "Slack authorization was denied.",
+    "missing_code": "Slack did not return an authorization code.",
+    "not_configured": "Slack OAuth is not configured on the server.",
+    "invalid_state": "The install link expired or was invalid. Start again from the portal.",
+    "oauth_http_failed": "Could not complete Slack authorization. Try again.",
+    "oauth_access_failed": "Slack rejected the authorization request.",
+    "missing_token": "Slack did not return a workspace token.",
+    "install_failed": "Could not save the Slack installation.",
+}
+
 
 def _resolve_tenant_id(principal: AuthPrincipal) -> UUID:
     return resolve_tenant_uuid_for_principal(principal)
 
 
-def _install_url(settings: Settings, tenant_id: UUID) -> str:
+def _install_url(settings: Settings, tenant_id: UUID, *, actor_sub: str) -> str:
     base = settings.public_base_url.rstrip("/")
-    return f"{base}/slack/install?tenant_id={tenant_id}"
+    state = create_slack_oauth_state(
+        settings=settings,
+        tenant_id=tenant_id,
+        actor_sub=actor_sub,
+    )
+    return f"{base}/slack/install?{urlencode({'state': state})}"
 
 
 def _portal_slack_redirect(
@@ -62,6 +80,7 @@ def _portal_slack_redirect(
     qs = urlencode(params)
     url = f"{base}/app/slack" + (f"?{qs}" if qs else "")
     return RedirectResponse(url)
+
 
 BOT_SCOPES = ",".join(
     [
@@ -143,13 +162,27 @@ async def slack_events(
 def slack_install(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[Session, Depends(get_db)],
-    tenant_id: Annotated[UUID, Query(description="client_id / tenants.id to map this workspace")],
+    state: Annotated[
+        str,
+        Query(description="Signed OAuth state from /slack/connection"),
+    ],
 ) -> RedirectResponse:
+    """Start Slack OAuth — requires a signed state minted by an authenticated org user."""
     if not settings.slack_client_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="SLACK_CLIENT_ID not configured",
         )
+
+    try:
+        tenant_id_str, _actor_sub = verify_slack_oauth_state(state, settings)
+        tenant_id = UUID(tenant_id_str)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired install link",
+        ) from exc
+
     if db.get(Tenant, tenant_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown tenant_id")
 
@@ -158,7 +191,7 @@ def slack_install(
         "client_id": settings.slack_client_id,
         "scope": BOT_SCOPES,
         "redirect_uri": redirect_uri,
-        "state": str(tenant_id),
+        "state": state,
     }
     url = f"https://slack.com/oauth/v2/authorize?{urlencode(params)}"
     return RedirectResponse(url)
@@ -174,18 +207,23 @@ def slack_oauth_callback(
 ) -> RedirectResponse:
     """Exchange OAuth code and redirect the browser back to the org portal."""
     if error:
-        return _portal_slack_redirect(settings, error=f"Slack OAuth error: {error}")
+        logger.warning("slack_oauth_denied error=%s", error)
+        return _portal_slack_redirect(settings, error="slack_denied")
     if not code or not state:
-        return _portal_slack_redirect(settings, error="Missing code or state")
+        return _portal_slack_redirect(settings, error="missing_code")
     if not settings.slack_client_id or not settings.slack_client_secret:
-        return _portal_slack_redirect(
-            settings, error="Slack OAuth credentials not configured"
-        )
+        return _portal_slack_redirect(settings, error="not_configured")
 
     try:
-        tenant_id = UUID(state)
+        tenant_id_str, actor_sub = verify_slack_oauth_state(state, settings)
+        tenant_id = UUID(tenant_id_str)
     except ValueError:
-        return _portal_slack_redirect(settings, error="Invalid state")
+        logger.warning("slack_oauth_invalid_state")
+        return _portal_slack_redirect(settings, error="invalid_state")
+
+    if db.get(Tenant, tenant_id) is None:
+        logger.warning("slack_oauth_unknown_tenant tenant_id=%s actor=%s", tenant_id, actor_sub)
+        return _portal_slack_redirect(settings, error="invalid_state")
 
     redirect_uri = f"{settings.public_base_url.rstrip('/')}/slack/oauth/callback"
     try:
@@ -201,20 +239,23 @@ def slack_oauth_callback(
             )
             resp.raise_for_status()
             data = resp.json()
-    except Exception as exc:  # noqa: BLE001 — surface to portal
-        logger.exception("slack_oauth_http_failed")
-        return _portal_slack_redirect(settings, error=f"OAuth request failed: {exc}")
+    except Exception:
+        logger.exception("slack_oauth_http_failed tenant_id=%s", tenant_id)
+        return _portal_slack_redirect(settings, error="oauth_http_failed")
 
     if not data.get("ok"):
-        return _portal_slack_redirect(
-            settings, error=f"oauth.v2.access failed: {data.get('error')}"
+        logger.warning(
+            "slack_oauth_access_failed tenant_id=%s slack_error=%s",
+            tenant_id,
+            data.get("error"),
         )
+        return _portal_slack_redirect(settings, error="oauth_access_failed")
 
     team = data.get("team") or {}
     team_id = team.get("id")
     bot_token = (data.get("access_token") or "").strip()
     if not team_id or not bot_token:
-        return _portal_slack_redirect(settings, error="Missing team or bot token")
+        return _portal_slack_redirect(settings, error="missing_token")
 
     try:
         row = upsert_install(
@@ -228,10 +269,16 @@ def slack_oauth_callback(
             scopes=data.get("scope"),
             raw={"ok": True, "team": team, "scope": data.get("scope"), "app_id": data.get("app_id")},
         )
-    except ValueError as exc:
-        return _portal_slack_redirect(settings, error=str(exc))
+    except ValueError:
+        logger.exception("slack_oauth_upsert_failed tenant_id=%s team_id=%s", tenant_id, team_id)
+        return _portal_slack_redirect(settings, error="install_failed")
 
-    logger.info("slack_install saved team_id=%s tenant_id=%s", team_id, tenant_id)
+    logger.info(
+        "slack_install saved team_id=%s tenant_id=%s actor=%s",
+        team_id,
+        tenant_id,
+        actor_sub,
+    )
     return _portal_slack_redirect(
         settings, connected=True, team_id=row.team_id
     )
@@ -246,7 +293,7 @@ def slack_connection(
     """Org portal: Slack install status for the current tenant (OR-08)."""
     tid = _resolve_tenant_id(principal)
     row = get_install_by_tenant(db, tid)
-    install_url = _install_url(settings, tid)
+    install_url = _install_url(settings, tid, actor_sub=principal.sub)
     if row is None:
         return {
             "connected": False,
@@ -273,9 +320,10 @@ def slack_connection(
 @router.get("/installs/{team_id}")
 def get_install(
     team_id: str,
+    _: Annotated[AuthPrincipal, Depends(require_platform_owner)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Any]:
-    """Lookup install mapping (no token returned)."""
+    """Platform admin: lookup install mapping (no token returned)."""
     row = get_install_by_team(db, team_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Install not found")
@@ -286,3 +334,6 @@ def get_install(
         "scopes": row.scopes,
         "installed_at": row.installed_at.isoformat() if row.installed_at else None,
     }
+
+
+__all__ = ["_OAUTH_USER_ERRORS", "router"]

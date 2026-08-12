@@ -1,6 +1,11 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from api.app.constants import DEFAULT_JWT_SECRET
+
+AppEnv = Literal["development", "staging", "production"]
 
 
 class Settings(BaseSettings):
@@ -26,7 +31,14 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     # Next.js origin for Stripe Checkout / Portal return URLs (Sprint 11)
     web_app_url: str = "http://localhost:3000"
-    jwt_secret: str = "dev-change-me-use-at-least-32-chars!!"
+    app_env: AppEnv = "development"
+    jwt_secret: str = DEFAULT_JWT_SECRET
+    # Optional separate key for encrypting Slack bot tokens (defaults to jwt_secret)
+    token_encryption_key: str = ""
+    # Comma-separated browser origins for CORS (Sprint 30 security)
+    cors_origins: str = "http://localhost:3000"
+    # Expose /debug/* routes (must be false in production)
+    debug_endpoints_enabled: bool = True
 
     # Uploads (Sprint 8) — relative paths resolve from process cwd (repo root)
     upload_dir: str = "data/uploads"
@@ -75,6 +87,8 @@ class Settings(BaseSettings):
     # Governance (Sprint 12+) — per-tenant gateway RPM
     rate_limit_enabled: bool = True
     rate_limit_rpm: int = 60
+    # When false, Redis errors deny requests instead of failing open
+    rate_limit_fail_open: bool = True
 
     # Demo seed hardening (Sprint 22.1) — laptop demo without live Stripe/OAuth
     demo_activate_plan: bool = False

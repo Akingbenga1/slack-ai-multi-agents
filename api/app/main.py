@@ -1,16 +1,21 @@
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.app.agent.routes import router as agent_router
 from api.app.admin.routes import router as admin_router
+from api.app.auth.deps import get_current_principal
 from api.app.auth.routes import router as auth_router
+from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.routes import router as billing_router
 from api.app.governance.routes import router as usage_router
 from api.app.health import run_deep_health
 from api.app.jobs.routes import router as jobs_router
 from api.app.logging_config import configure_logging, get_logger
 from api.app.middleware import TenantContextMiddleware, TenantRateLimitMiddleware
-from api.app.settings import get_settings
+from api.app.security import cors_allow_origins, validate_security_settings
+from api.app.settings import Settings, get_settings
 from api.app.slack.routes import router as slack_router
 from api.app.tenant import get_client_id
 from api.app.uploads.routes import router as uploads_router
@@ -19,13 +24,23 @@ from api.app.workflows.routes import router as workflows_router
 configure_logging()
 logger = get_logger("api")
 
-app = FastAPI(title="Client Slack AI Agents API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    settings = get_settings()
+    validate_security_settings(settings)
+    logger.info("security_settings_ok app_env=%s", settings.app_env)
+    yield
+
+
+app = FastAPI(title="Client Slack AI Agents API", version="0.1.0", lifespan=lifespan)
 # Starlette: last added runs first. Order: CORS → Tenant → RateLimit → routes.
 app.add_middleware(TenantRateLimitMiddleware)
 app.add_middleware(TenantContextMiddleware)
+_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_allow_origins(_settings),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,7 +65,11 @@ def health() -> dict:
     return payload
 
 
-@app.get("/debug/tenant")
-def debug_tenant() -> dict[str, str | None]:
-    """Dev helper to verify tenant middleware."""
-    return {"client_id": get_client_id()}
+if _settings.debug_endpoints_enabled:
+
+    @app.get("/debug/tenant")
+    def debug_tenant(
+        _: AuthPrincipal = Depends(get_current_principal),
+    ) -> dict[str, str | None]:
+        """Dev helper to verify tenant middleware (auth required)."""
+        return {"client_id": get_client_id()}

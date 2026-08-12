@@ -28,6 +28,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 DEMO_TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
 DEMO_OWNER_ID = UUID("22222222-2222-2222-2222-222222222222")
 DEMO_ADMIN_ID = UUID("33333333-3333-3333-3333-333333333333")
+# Internal RBAC tenant for platform_owner memberships (not an org portal tenant)
+PLATFORM_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 @dataclass
@@ -56,8 +58,14 @@ def resolve_login_principal(db: Session, *, email: str, password: str) -> LoginP
     if not verify_password(password, user.hashed_password):
         return None
 
-    # Platform owner: no tenant membership; all-access
-    if user.id == DEMO_OWNER_ID or user.email == "owner@example.com":
+    memberships = db.scalars(
+        select(Membership)
+        .options(joinedload(Membership.role), joinedload(Membership.tenant))
+        .where(Membership.user_id == user.id)
+    ).all()
+
+    platform_roles = [m for m in memberships if m.role.name == "platform_owner"]
+    if platform_roles:
         return LoginPrincipal(
             sub=str(user.id),
             email=user.email,
@@ -66,20 +74,12 @@ def resolve_login_principal(db: Session, *, email: str, password: str) -> LoginP
             all_access=True,
         )
 
-    memberships = db.scalars(
-        select(Membership)
-        .options(joinedload(Membership.role), joinedload(Membership.tenant))
-        .where(Membership.user_id == user.id)
-    ).all()
-
+    org_roles = [m for m in memberships if m.role.name == "org_admin"]
     # MVP: org user belongs to exactly one tenant
-    if len(memberships) != 1:
+    if len(org_roles) != 1:
         return None
 
-    m = memberships[0]
-    if m.role.name != "org_admin":
-        return None
-
+    m = org_roles[0]
     return LoginPrincipal(
         sub=str(user.id),
         email=user.email,
@@ -115,6 +115,17 @@ def ensure_demo_memberships(db: Session) -> None:
         db.add(tenant)
         db.flush()
 
+    platform_tenant = db.get(Tenant, PLATFORM_TENANT_ID)
+    if platform_tenant is None:
+        platform_tenant = Tenant(
+            id=PLATFORM_TENANT_ID,
+            slug="__platform__",
+            name="Platform (internal)",
+            status="active",
+        )
+        db.add(platform_tenant)
+        db.flush()
+
     owner = db.get(User, DEMO_OWNER_ID)
     if owner is None:
         owner = User(
@@ -126,9 +137,23 @@ def ensure_demo_memberships(db: Session) -> None:
         )
         db.add(owner)
         db.flush()
-    else:
-        for m in db.scalars(select(Membership).where(Membership.user_id == owner.id)).all():
-            db.delete(m)
+
+    owner_membership = db.scalar(
+        select(Membership).where(
+            Membership.user_id == owner.id,
+            Membership.tenant_id == platform_tenant.id,
+        )
+    )
+    if owner_membership is None:
+        db.add(
+            Membership(
+                tenant_id=platform_tenant.id,
+                user_id=owner.id,
+                role_id=role_rows["platform_owner"].id,
+            )
+        )
+    elif owner_membership.role_id != role_rows["platform_owner"].id:
+        owner_membership.role_id = role_rows["platform_owner"].id
 
     admin = db.get(User, DEMO_ADMIN_ID)
     if admin is None:

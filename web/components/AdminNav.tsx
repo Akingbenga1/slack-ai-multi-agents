@@ -39,6 +39,7 @@ export function AdminNav() {
         <Link
           key={item.href}
           href={item.href}
+          aria-current={current === item.key ? "page" : undefined}
           style={{
             ...LINK_STYLE,
             fontWeight: current === item.key ? 600 : 400,

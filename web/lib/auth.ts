@@ -3,34 +3,12 @@ import CredentialsProvider from "next-auth/providers/credentials";
 
 export type AppRole = "platform_owner" | "org_admin";
 
-type DemoUser = {
-  id: string;
+type ApiMe = {
+  sub: string;
   email: string;
-  password: string;
-  name: string;
   role: AppRole;
-  tenantId: string | null;
+  tenant_id: string | null;
 };
-
-/** Demo users only — replace with DB in later auth tasks. */
-const DEMO_USERS: DemoUser[] = [
-  {
-    id: "user-platform-owner",
-    email: "owner@example.com",
-    password: "owner123",
-    name: "Platform Owner",
-    role: "platform_owner",
-    tenantId: null,
-  },
-  {
-    id: "user-org-admin",
-    email: "admin@example.com",
-    password: "admin123",
-    name: "Org Admin",
-    role: "org_admin",
-    tenantId: "11111111-1111-1111-1111-111111111111",
-  },
-];
 
 function apiBaseUrl(): string | null {
   const raw = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
@@ -38,7 +16,7 @@ function apiBaseUrl(): string | null {
   return raw.replace(/\/$/, "");
 }
 
-/** Mint FastAPI Bearer JWT with the same demo credentials (architecture: session → API). */
+/** Mint FastAPI Bearer JWT (credentials validated server-side in Postgres). */
 async function fetchApiAccessToken(
   email: string,
   password: string,
@@ -54,6 +32,20 @@ async function fetchApiAccessToken(
     if (!res.ok) return null;
     const data = (await res.json()) as { access_token?: string };
     return data.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchApiMe(accessToken: string): Promise<ApiMe | null> {
+  const base = apiBaseUrl();
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base}/auth/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ApiMe;
   } catch {
     return null;
   }
@@ -75,24 +67,23 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials.password) {
           return null;
         }
-        const user = DEMO_USERS.find(
-          (u) =>
-            u.email.toLowerCase() === credentials.email.toLowerCase() &&
-            u.password === credentials.password,
-        );
-        if (!user) {
-          return null;
-        }
         const accessToken = await fetchApiAccessToken(
           credentials.email,
           credentials.password,
         );
+        if (!accessToken) {
+          return null;
+        }
+        const me = await fetchApiMe(accessToken);
+        if (!me?.sub || !me.email) {
+          return null;
+        }
         return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          tenantId: user.tenantId,
+          id: me.sub,
+          email: me.email,
+          name: me.email,
+          role: me.role,
+          tenantId: me.tenant_id,
           accessToken,
         };
       },

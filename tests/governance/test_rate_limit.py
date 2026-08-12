@@ -14,7 +14,7 @@ from api.app.governance.rate_limit import (
     rate_limit_headers,
 )
 from api.app.main import app
-from api.app.settings import Settings
+from api.app.settings import Settings, get_settings
 
 
 class _FakePipeline:
@@ -127,17 +127,53 @@ def test_redis_error_fails_open():
         def close(self):
             return None
 
-    settings = Settings(rate_limit_enabled=True, rate_limit_rpm=1, redis_url="redis://unused")
+    settings = Settings(
+        rate_limit_enabled=True,
+        rate_limit_rpm=1,
+        rate_limit_fail_open=True,
+        redis_url="redis://unused",
+    )
     d = check_tenant_rate_limit(str(uuid4()), settings=settings, redis_client=BoomRedis())  # type: ignore[arg-type]
     assert d.allowed is True
     assert d.skipped is True
 
 
+def test_redis_error_fails_closed_when_configured():
+    class BoomRedis:
+        def pipeline(self):
+            raise ConnectionError("down")
+
+        def close(self):
+            return None
+
+    settings = Settings(
+        rate_limit_enabled=True,
+        rate_limit_rpm=1,
+        rate_limit_fail_open=False,
+        redis_url="redis://unused",
+    )
+    d = check_tenant_rate_limit(
+        str(uuid4()),
+        settings=settings,
+        redis_client=BoomRedis(),  # type: ignore[arg-type]
+        now=1_700_000_000.0,
+    )
+    assert d.allowed is False
+    assert d.skipped is False
+
+
 def test_middleware_returns_429(monkeypatch: pytest.MonkeyPatch):
     fake = FakeRedis()
-    settings = Settings(rate_limit_enabled=True, rate_limit_rpm=2, redis_url="redis://unused")
+    settings = Settings(
+        rate_limit_enabled=True,
+        rate_limit_rpm=2,
+        redis_url="redis://unused",
+        jwt_secret="test-secret-at-least-32-chars-long!",
+        debug_endpoints_enabled=True,
+    )
 
     monkeypatch.setattr("api.app.middleware.get_settings", lambda: settings)
+    app.dependency_overrides[get_settings] = lambda: settings
     monkeypatch.setattr(
         "api.app.middleware.check_tenant_rate_limit",
         lambda client_id, settings=None: check_tenant_rate_limit(
@@ -146,27 +182,58 @@ def test_middleware_returns_429(monkeypatch: pytest.MonkeyPatch):
     )
 
     client = TestClient(app)
-    headers = {"X-Client-Id": str(uuid4())}
-    assert client.get("/debug/tenant", headers=headers).status_code == 200
-    assert client.get("/debug/tenant", headers=headers).status_code == 200
-    r = client.get("/debug/tenant", headers=headers)
-    assert r.status_code == 429
-    assert r.json()["detail"] == "rate_limit_exceeded"
-    assert "Retry-After" in r.headers
+    cid = str(uuid4())
+    headers = {
+        "Authorization": f"Bearer {_debug_bearer_token()}",
+        "X-Client-Id": cid,
+    }
+    try:
+        assert client.get("/debug/tenant", headers=headers).status_code == 200
+        assert client.get("/debug/tenant", headers=headers).status_code == 200
+        r = client.get("/debug/tenant", headers=headers)
+        assert r.status_code == 429
+        assert r.json()["detail"] == "rate_limit_exceeded"
+        assert "Retry-After" in r.headers
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _debug_bearer_token() -> str:
+    from api.app.auth.tokens import create_access_token
+
+    return create_access_token(
+        settings=Settings(jwt_secret="test-secret-at-least-32-chars-long!"),
+        sub="debug-user",
+        email="debug@example.com",
+        role="org_admin",
+        tenant_id=str(uuid4()),
+    )
 
 
 def test_middleware_skips_without_client_id(monkeypatch: pytest.MonkeyPatch):
-    settings = Settings(rate_limit_enabled=True, rate_limit_rpm=1, redis_url="redis://unused")
+    settings = Settings(
+        rate_limit_enabled=True,
+        rate_limit_rpm=1,
+        redis_url="redis://unused",
+        jwt_secret="test-secret-at-least-32-chars-long!",
+        debug_endpoints_enabled=True,
+    )
     monkeypatch.setattr("api.app.middleware.get_settings", lambda: settings)
+    app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
-    # No X-Client-Id → not rate limited (even if RPM=1)
-    for _ in range(3):
-        assert client.get("/debug/tenant").status_code == 200
+    headers = {"Authorization": f"Bearer {_debug_bearer_token()}"}
+    try:
+        # Bearer without X-Client-Id → not rate limited (even if RPM=1)
+        for _ in range(3):
+            assert client.get("/debug/tenant", headers=headers).status_code == 200
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_health_exempt(monkeypatch: pytest.MonkeyPatch):
     settings = Settings(rate_limit_enabled=True, rate_limit_rpm=1, redis_url="redis://unused")
     monkeypatch.setattr("api.app.middleware.get_settings", lambda: settings)
+    monkeypatch.setattr("api.app.auth.deps.get_settings", lambda: settings)
     client = TestClient(app)
     headers = {"X-Client-Id": str(uuid4())}
     # Health is exempt even with client id; may be degraded if deps down

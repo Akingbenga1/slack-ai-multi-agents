@@ -10,6 +10,22 @@ type Props = {
   errorFlag?: string | null;
 };
 
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  slack_denied: "Slack authorization was denied.",
+  missing_code: "Slack did not return an authorization code.",
+  not_configured: "Slack OAuth is not configured on the API.",
+  invalid_state: "The install link expired. Click Connect Slack again from this page.",
+  oauth_http_failed: "Could not complete Slack authorization. Try again.",
+  oauth_access_failed: "Slack rejected the authorization request.",
+  missing_token: "Slack did not return a workspace token.",
+  install_failed: "Could not save the Slack installation.",
+};
+
+function oauthErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  return OAUTH_ERROR_MESSAGES[code] ?? "Slack connection failed. Try again.";
+}
+
 type SlackConnection = {
   connected: boolean;
   client_id: string;
@@ -42,7 +58,7 @@ export function SlackConnectPanel({
   errorFlag = null,
 }: Props) {
   const [data, setData] = useState<SlackConnection | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(errorFlag);
+  const [error, setError] = useState<string | null>(oauthErrorMessage(errorFlag));
 
   useEffect(() => {
     if (!accessToken) {

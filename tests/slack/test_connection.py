@@ -85,7 +85,8 @@ def test_connection_disconnected(client: TestClient, db: Session):
     body = res.json()
     assert body["connected"] is False
     assert body["client_id"] == str(tid)
-    assert f"tenant_id={tid}" in body["install_url"]
+    assert "state=" in body["install_url"]
+    assert f"tenant_id={tid}" not in body["install_url"]
 
 
 def test_connection_connected(client: TestClient, db: Session):
@@ -131,4 +132,37 @@ def test_oauth_callback_error_redirects_to_portal(client: TestClient):
     assert res.status_code in (302, 303, 307)
     loc = res.headers.get("location") or ""
     assert loc.startswith("http://localhost:3000/app/slack")
-    assert "error=" in loc
+    assert "error=slack_denied" in loc
+
+
+def test_install_rejects_missing_state(client: TestClient, db: Session):
+    tid = uuid4()
+    db.add(Tenant(id=tid, slug=f"s-{tid.hex[:8]}", name="S", status="active"))
+    db.commit()
+    res = client.get(f"/slack/install?tenant_id={tid}", follow_redirects=False)
+    assert res.status_code == 422
+
+
+def test_install_rejects_invalid_state(client: TestClient, db: Session):
+    tid = uuid4()
+    db.add(Tenant(id=tid, slug=f"s-{tid.hex[:8]}", name="S", status="active"))
+    db.commit()
+    res = client.get("/slack/install?state=not-a-valid-token", follow_redirects=False)
+    assert res.status_code == 400
+
+
+def test_install_redirects_with_valid_state(client: TestClient, db: Session):
+    from api.app.slack.oauth_state import create_slack_oauth_state
+
+    tid = uuid4()
+    db.add(Tenant(id=tid, slug=f"s-{tid.hex[:8]}", name="S", status="active"))
+    db.commit()
+    settings = Settings(
+        jwt_secret="test-secret-at-least-32-chars-long!",
+        slack_client_id="cid",
+    )
+    state = create_slack_oauth_state(settings=settings, tenant_id=tid, actor_sub="actor")
+    res = client.get(f"/slack/install?state={state}", follow_redirects=False)
+    assert res.status_code in (302, 303, 307)
+    loc = res.headers.get("location") or ""
+    assert loc.startswith("https://slack.com/oauth/v2/authorize")

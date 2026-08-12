@@ -10,8 +10,15 @@ from cryptography.fernet import Fernet, InvalidToken
 from api.app.settings import Settings
 
 
+def _encryption_secret(settings: Settings) -> str:
+    explicit = (settings.token_encryption_key or "").strip()
+    if explicit:
+        return explicit
+    return settings.jwt_secret
+
+
 def _fernet(settings: Settings) -> Fernet:
-    digest = hashlib.sha256(settings.jwt_secret.encode("utf-8")).digest()
+    digest = hashlib.sha256(_encryption_secret(settings).encode("utf-8")).digest()
     key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 

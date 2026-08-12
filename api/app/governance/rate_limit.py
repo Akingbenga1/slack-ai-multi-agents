@@ -126,8 +126,18 @@ def check_tenant_rate_limit(
             retry_after=0,
             client_id=cid,
         )
-    except Exception as exc:  # noqa: BLE001 — fail open
+    except Exception as exc:  # noqa: BLE001
         logger.error("rate_limit_redis_error client_id=%s err=%s", cid, exc)
+        if not cfg.rate_limit_fail_open:
+            retry = max(1, reset_at - int(now if now is not None else time.time()))
+            return RateLimitDecision(
+                allowed=False,
+                limit=limit,
+                remaining=0,
+                reset_at=reset_at,
+                retry_after=retry,
+                client_id=cid,
+            )
         return RateLimitDecision(
             allowed=True,
             limit=limit,
