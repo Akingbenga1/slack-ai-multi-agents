@@ -48,14 +48,14 @@ def test_apply_plan_state_sets_entitlements(db: Session):
     db.flush()
     row = BillingCustomer(
         tenant_id=t.id,
-        stripe_customer_id="cus_e",
+        external_customer_id="cus_e",
         plan_status="inactive",
         entitlements={"agent": False, "ingest": False, "sync": False},
     )
     db.add(row)
     db.flush()
 
-    apply_plan_state(db, row, plan_status="active", stripe_subscription_id="sub_e")
+    apply_plan_state(db, row, plan_status="active", external_subscription_id="sub_e")
     assert row.entitlements == ACTIVE_ENTITLEMENTS
     assert plan_is_active(db, t.id) is True
     assert tenant_has_entitlement(db, t.id, "agent") is True

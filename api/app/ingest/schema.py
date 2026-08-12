@@ -20,7 +20,7 @@ class SourceFormat(StrEnum):
 
 
 class NormalizedMessage(BaseModel):
-    """Canonical message used by parsers → chunk → TEI → Qdrant."""
+    """Canonical message used by parsers → chunk → embed → upsert."""
 
     channel: str = Field(..., min_length=1, description="Slack channel id or export name")
     ts: str = Field(..., min_length=1, description="Slack message timestamp id")

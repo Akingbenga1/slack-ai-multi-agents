@@ -89,7 +89,7 @@ def test_compose_uses_status_system_prompt():
                 }
             ],
             "workflow": "status",
-            "model_tier": "sonnet",
+            "model_tier": "capable",
             "question": "Who said launch is Friday?",
         }
     )
@@ -131,7 +131,7 @@ def test_run_agent_status_workflow_escalates():
         record_usage=False,
     )
     assert out["workflow"] == "status"
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert any(f.startswith("workflow:status") for f in out["complexity_flags"])
     assert out["hedge"] is False
 

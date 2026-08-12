@@ -85,14 +85,14 @@ def test_compose_uses_brief_prompt_and_draft():
                 }
             ],
             "workflow": "meeting_brief",
-            "model_tier": "sonnet",
+            "model_tier": "capable",
             "question": "Brief me for the launch sync",
             "meeting_draft": "# Meeting brief: launch\n\n## Purpose\n- Align on launch\n",
         }
     )
     assert out["hedge"] is False
     assert seen["system"] == SYSTEM_MEETING_BRIEF
-    assert seen["tier"] == "sonnet"
+    assert seen["tier"] == "capable"
     assert "Draft outline:" in seen["user"]
     assert "Workflow: meeting_brief" in seen["user"]
 
@@ -128,11 +128,11 @@ def test_run_agent_meeting_brief_via_mcp_draft():
         record_usage=False,
     )
     assert out["workflow"] == "meeting_brief"
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert "draft_meeting_brief" in calls
     assert "search_knowledge" not in calls
     assert out["hedge"] is False
     assert len(out["retrieved_chunks"]) >= 1
     assert out["meeting_draft"]
     assert "Meeting brief" in out["meeting_draft"]
-    assert "stub:sonnet" in out["answer"]
+    assert "stub:capable" in out["answer"]

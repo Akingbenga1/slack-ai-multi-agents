@@ -11,7 +11,7 @@ Table `workflow_templates` (Alembic `d4e9a21b8c30`):
 | `tenant_id` | Fail-closed scope (`client_id`) |
 | `title`, `original_filename`, `body_text` | Discover + advice grounding |
 | `source_slack_file_id` | Slack file id when stored from channel |
-| `storage_relative_path` | Under `UPLOAD_DIR/{client_id}/` |
+| `storage_relative_path` | Blob key under the tenant (local adapter: `UPLOAD_DIR/{client_id}/…`) |
 | `content_hash` | SHA-256 of bytes (idempotent shared store) |
 | `visibility` | `shared` (library) or `personal` (copy/draft) |
 | `parent_id` | Set on copies; shared originals leave null |

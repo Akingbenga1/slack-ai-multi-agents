@@ -9,14 +9,18 @@ from fastapi.testclient import TestClient
 
 from api.app.auth.tokens import create_access_token
 from api.app.db.session import get_db
+from api.app.job_queue import EnqueueResult
 from api.app.main import app
 from api.app.membership import DEMO_ADMIN_ID, DEMO_OWNER_ID, DEMO_TENANT_ID
 from api.app.settings import Settings, get_settings
 from tests.schedules.helpers import FakeScheduleDB, MemorySchedules
 
 
-class _FakeAsync:
-    id = "sync-task-1"
+class _FakeQueue:
+    name = "celery"
+
+    def enqueue(self, *, kind: str, tenant_id: str, payload=None):
+        return EnqueueResult(task_id="sync-task-1", queue="low", kind=kind)
 
 
 @pytest.fixture
@@ -28,8 +32,8 @@ def schedules() -> MemorySchedules:
 def client(schedules: MemorySchedules, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     settings = Settings(jwt_secret="test-secret-at-least-32-chars-long!")
     monkeypatch.setattr(
-        "api.app.jobs.routes.enqueue_slack_history_sync",
-        lambda **_kwargs: _FakeAsync(),
+        "api.app.jobs.routes.get_job_queue",
+        lambda: _FakeQueue(),
     )
     monkeypatch.setattr(
         "api.app.jobs.routes.is_slack_history_sync_enabled",
@@ -140,15 +144,21 @@ def test_dispatch_enqueues_due_tenants(monkeypatch: pytest.MonkeyPatch):
         lambda _db, _key: [t1, t2],
     )
 
-    class _R:
-        def __init__(self, tid: str):
-            self.id = f"task-{tid[:8]}"
+    class _FakeQueue:
+        name = "celery"
 
-    def fake_enqueue(*, client_id: str, **_kwargs):
-        enqueued.append(client_id)
-        return _R(client_id)
+        def enqueue(self, *, kind: str, tenant_id: str, payload=None):
+            enqueued.append(tenant_id)
+            return EnqueueResult(
+                task_id=f"task-{tenant_id[:8]}",
+                queue="low",
+                kind=kind,
+            )
 
-    monkeypatch.setattr(worker_tasks, "enqueue_slack_history_sync", fake_enqueue)
+    monkeypatch.setattr(
+        "api.app.job_queue.get_job_queue",
+        lambda: _FakeQueue(),
+    )
 
     result = worker_tasks.dispatch_slack_history_syncs.run()
     assert result["count"] == 2

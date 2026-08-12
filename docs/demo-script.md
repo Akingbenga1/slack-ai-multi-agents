@@ -49,7 +49,7 @@ Spoken / walkthrough path for **Milestone DoD** on the demo tenant. Operator bri
 **Surface:** Slack mention or DM
 
 1. Ask a question that exists in the demo corpus (or seeded sample).
-2. Show citation / grounded reply (or stub compose if no `ANTHROPIC_API_KEY`).
+2. Show citation / grounded reply (or stub compose with `LLM_PROVIDER=stub`).
 
 **Fallback:** `POST /agent/dry-run` or `scripts/agent_dry_run.py --client-id 11111111-…`.
 
@@ -121,7 +121,7 @@ Spoken / walkthrough path for **Milestone DoD** on the demo tenant. Operator bri
 
 1. Show the honest **not configured** response (no invented checklist).
 
-**Say:** “Onboarding process is explicitly deferred — we don’t fake a workflow.”
+**Say:** “Onboarding process is explicitly deferred — we don’t fake a workflow. This is not how a new org signs up; that’s `/signup`.”
 
 Docs: `docs/onboarding.md`.
 
@@ -145,7 +145,7 @@ Docs: `docs/onboarding.md`.
 
 - Stripe test keys + webhook URL  
 - Slack app credentials + tunnel + install  
-- Optional `ANTHROPIC_API_KEY` for non-stub compose  
+- Optional live compose: `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` (or `ollama`)  
 - Report channel id + worker/Beat running  
 
 Without those, narrate with `DEMO_ACTIVATE_PLAN`, dry-run, and portal/admin UIs still on the demo tenant.

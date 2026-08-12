@@ -29,7 +29,6 @@ from worker.job_meta import (
     KIND_RECURRING_REPORT,
     KIND_SLACK_HISTORY_SYNC,
 )
-from worker.queues import enqueue_options
 from worker.tenant_job import (
     TenantJobContext,
     resolve_tenant_id,
@@ -72,10 +71,13 @@ def enqueue_heartbeat(
     message: str = "ok",
     priority: int = 0,
 ) -> Any:
-    """Enqueue heartbeat on the priority-mapped queue with tenant header."""
-    return heartbeat.apply_async(
-        kwargs={"message": message, "tenant_id": client_id, "priority": priority},
-        **enqueue_options(client_id=client_id, priority=priority),
+    """Enqueue heartbeat via ``JobQueue`` (thin facade for smokes / callers)."""
+    from api.app.job_queue import get_job_queue
+
+    return get_job_queue().enqueue(
+        kind=KIND_HEARTBEAT,
+        tenant_id=client_id,
+        payload={"message": message, "priority": priority},
     )
 
 
@@ -136,18 +138,20 @@ def enqueue_ingest_upload(
     channel: Optional[str] = None,
     priority: int = 0,
 ) -> Any:
-    """Enqueue upload ingest with tenant Celery header."""
-    return ingest_upload_task.apply_async(
-        kwargs={
+    """Enqueue upload ingest via ``JobQueue`` (thin facade)."""
+    from api.app.job_queue import get_job_queue
+
+    return get_job_queue().enqueue(
+        kind=KIND_INGEST_UPLOAD,
+        tenant_id=client_id,
+        payload={
             "relative_path": relative_path,
             "filename": filename,
             "file_role": str(file_role),
-            "tenant_id": client_id,
             "upload_id": upload_id,
             "channel": channel,
             "priority": priority,
         },
-        **enqueue_options(client_id=client_id, priority=priority),
     )
 
 
@@ -198,15 +202,14 @@ def enqueue_slack_history_sync(
     channel_ids: Optional[Sequence[str]] = None,
     priority: int = -1,
 ) -> Any:
-    """Enqueue live Slack history sync (default low-priority bulk queue)."""
+    """Enqueue live Slack history sync via ``JobQueue`` (thin facade)."""
+    from api.app.job_queue import get_job_queue
+
     ids = list(channel_ids) if channel_ids is not None else None
-    return slack_history_sync_task.apply_async(
-        kwargs={
-            "tenant_id": client_id,
-            "channel_ids": ids,
-            "priority": priority,
-        },
-        **enqueue_options(client_id=client_id, priority=priority),
+    return get_job_queue().enqueue(
+        kind=KIND_SLACK_HISTORY_SYNC,
+        tenant_id=client_id,
+        payload={"channel_ids": ids, "priority": priority},
     )
 
 
@@ -216,14 +219,22 @@ def dispatch_slack_history_syncs(self) -> dict[str, Any]:
     Beat entrypoint: enqueue ``slack_history_sync`` for each due tenant.
 
     Due = has Slack install and ``schedules.slack_history_sync.enabled`` not false.
-    On-demand API bypasses this gate.
+    On-demand API bypasses this gate. Enqueue goes through ``JobQueue``.
     """
+    from api.app.job_queue import get_job_queue
+
+    queue = get_job_queue()
+
     return run_dispatch(
         self,
         list_due=lambda db: list_due_for_kind(db, SLACK_HISTORY_SYNC_KEY),
         enqueue_row=lambda tenant_id: {
             "client_id": str(tenant_id),
-            "task_id": enqueue_slack_history_sync(client_id=str(tenant_id)).id,
+            "task_id": queue.enqueue(
+                kind=KIND_SLACK_HISTORY_SYNC,
+                tenant_id=str(tenant_id),
+                payload={},
+            ).task_id,
         },
         log_label="dispatch_slack_history_syncs",
     )
@@ -297,17 +308,19 @@ def enqueue_recurring_report(
     force: bool = False,
     priority: int = 0,
 ) -> Any:
-    """Enqueue a forced or scheduled recurring report post."""
-    return recurring_report_task.apply_async(
-        kwargs={
-            "tenant_id": client_id,
+    """Enqueue a recurring report via ``JobQueue`` (thin facade)."""
+    from api.app.job_queue import get_job_queue
+
+    return get_job_queue().enqueue(
+        kind=KIND_RECURRING_REPORT,
+        tenant_id=client_id,
+        payload={
             "channel_id": channel_id,
             "window_label": window_label,
             "prefer_sync": prefer_sync,
             "force": force,
             "priority": priority,
         },
-        **enqueue_options(client_id=client_id, priority=priority),
     )
 
 
@@ -320,21 +333,27 @@ def dispatch_recurring_reports(
     Beat entrypoint: enqueue ``recurring_report`` for each due tenant.
 
     Due = Slack install + schedule enabled + channel_id set (+ optional cadence).
-    On-demand API bypasses the enable gate.
+    On-demand API bypasses the enable gate. Enqueue goes through ``JobQueue``.
     """
+    from api.app.job_queue import get_job_queue
+
     cadence_filter = cadence if cadence in ("daily", "weekly") else None
+    queue = get_job_queue()
 
     def enqueue_row(row: dict[str, Any]) -> dict[str, str]:
         client_id = str(row["tenant_id"])
-        async_result = enqueue_recurring_report(
-            client_id=client_id,
-            channel_id=row["channel_id"],
-            window_label=row["window_label"],
-            prefer_sync=True,
+        result = queue.enqueue(
+            kind=KIND_RECURRING_REPORT,
+            tenant_id=client_id,
+            payload={
+                "channel_id": row["channel_id"],
+                "window_label": row["window_label"],
+                "prefer_sync": True,
+            },
         )
         return {
             "client_id": client_id,
-            "task_id": async_result.id,
+            "task_id": result.task_id,
             "channel_id": row["channel_id"],
             "cadence": row["cadence"],
         }

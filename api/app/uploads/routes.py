@@ -24,12 +24,12 @@ from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.plans import require_entitlement
 from api.app.db.session import get_db
 from api.app.governance.budgets import require_budget
+from api.app.job_queue import get_job_queue
 from api.app.settings import Settings, get_settings
 from api.app.uploads.roles import FileRole
 from api.app.uploads.status import get_ingest_job_by_upload_id, list_ingest_jobs
 from api.app.uploads.storage import StoredUpload, store_upload
-from worker.queues import queue_for_priority
-from worker.tasks import enqueue_ingest_upload
+from worker.job_meta import KIND_INGEST_UPLOAD
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
@@ -46,7 +46,7 @@ class UploadResponse(BaseModel):
     size_bytes: int
     content_type: Optional[str] = None
     status: str = Field(default="stored", description="stored | queued")
-    task_id: Optional[str] = Field(default=None, description="Celery task id when queued")
+    task_id: Optional[str] = Field(default=None, description="Job-queue task id when queued")
     queue: Optional[str] = None
 
 
@@ -184,12 +184,12 @@ async def upload_knowledge_file(
 
     try:
         stored = store_upload(
-            upload_root=settings.upload_dir_path,
             client_id=client_id,
             file_role=file_role,
             filename=filename,
             data=data,
             content_type=file.content_type,
+            settings=settings,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -200,18 +200,21 @@ async def upload_knowledge_file(
     if not enqueue:
         return _to_response(stored, status_value="stored")
 
-    async_result = enqueue_ingest_upload(
-        client_id=client_id,
-        relative_path=stored.relative_path,
-        filename=stored.original_filename,
-        file_role=stored.file_role,
-        upload_id=stored.upload_id,
-        channel=(channel or "").strip() or None,
-        priority=0,
+    result = get_job_queue().enqueue(
+        kind=KIND_INGEST_UPLOAD,
+        tenant_id=client_id,
+        payload={
+            "relative_path": stored.relative_path,
+            "filename": stored.original_filename,
+            "file_role": str(stored.file_role),
+            "upload_id": stored.upload_id,
+            "channel": (channel or "").strip() or None,
+            "priority": 0,
+        },
     )
     return _to_response(
         stored,
         status_value="queued",
-        task_id=async_result.id,
-        queue=queue_for_priority(0),
+        task_id=result.task_id,
+        queue=result.queue,
     )

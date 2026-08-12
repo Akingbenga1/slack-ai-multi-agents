@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app.auth.tokens import create_access_token
+from api.app.job_queue import EnqueueResult
 from api.app.main import app
 from api.app.membership import DEMO_ADMIN_ID, DEMO_OWNER_ID, DEMO_TENANT_ID
 from api.app.settings import Settings, get_settings
@@ -30,12 +31,15 @@ def client(upload_root: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     monkeypatch.setattr("api.app.uploads.routes.get_settings", lambda: settings)
 
-    class _FakeAsync:
-        id = "task-test-1"
+    class _FakeQueue:
+        name = "celery"
+
+        def enqueue(self, *, kind: str, tenant_id: str, payload=None):
+            return EnqueueResult(task_id="task-test-1", queue="default", kind=kind)
 
     monkeypatch.setattr(
-        "api.app.uploads.routes.enqueue_ingest_upload",
-        lambda **_kwargs: _FakeAsync(),
+        "api.app.uploads.routes.get_job_queue",
+        lambda: _FakeQueue(),
     )
     monkeypatch.setattr(
         "api.app.uploads.routes.require_entitlement",

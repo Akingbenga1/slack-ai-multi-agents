@@ -8,8 +8,9 @@ from qdrant_client.http import models
 from api.app.qdrant.client import get_qdrant_client
 from api.app.settings import Settings, get_settings
 
+# Same value as ``api.app.vector_store.types.CLIENT_ID_PAYLOAD_KEY`` (keep in sync).
+# Defined here so adapter helpers do not import ``vector_store`` (avoids circular import).
 CLIENT_ID_PAYLOAD_KEY = "client_id"
-
 
 def ensure_knowledge_collection(
     *,

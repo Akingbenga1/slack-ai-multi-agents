@@ -7,7 +7,7 @@ Classifier + tool + delivery Strategies for these workflows live in the agent re
 ## Flow
 
 1. Mention/DM with `files` (or file permalink / `F…` id in text)
-2. `intake_attachments` downloads via bot token, stores under `data/uploads/{client_id}/`, parses with `extract_document`
+2. `intake_attachments` downloads via bot token, stores via ``BlobStore`` (local: `data/uploads/{client_id}/`), parses with `extract_document`
 3. Agent state carries `attached_evidence`; tools merge attachment chunks ahead of optional RAG
 4. Route classifies `file_analyse` / `file_pdf_export` / `file_rename`
 5. Heavy workflows (`file_pdf_export`, `file_rename`) also check **jobs** budget before the graph
@@ -20,7 +20,7 @@ Slack has **no reliable API to change a file’s underlying filename**. This sta
 
 | Step | What happens |
 | ---- | ------------ |
-| Org copy | Rename under `data/uploads/{client_id}/` (fail-closed path escape / wrong tenant) |
+| Org copy | Rename via ``BlobStore`` under the tenant prefix (fail-closed key escape / wrong tenant) |
 | Slack | Best-effort `files.edit` **title** update (`files:write`) |
 | MCP | `rename_slack_file` — same semantics; `client_id` required |
 
@@ -28,7 +28,7 @@ If Slack title edit fails, the reply still confirms the org-copy rename and expl
 
 ## PDF library
 
-**fpdf2** — lightweight PDF writer. Documented here so operators know why it appears in `pyproject.toml`. Unicode outside Latin-1 is replaced for Helvetica core fonts (demo-safe).
+**fpdf2** — first ``PdfRenderer`` adapter (lightweight PDF writer). Documented here so operators know why it appears in `pyproject.toml`. Unicode outside Latin-1 is replaced for Helvetica core fonts (demo-safe). Product code calls `analysis_to_pdf_bytes` (title + body → bytes); it does not import fpdf2 by name.
 
 ## Scopes (Needs human)
 

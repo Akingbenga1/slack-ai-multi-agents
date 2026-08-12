@@ -1,6 +1,28 @@
 import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { InvitePanel } from "@/components/InvitePanel";
+import { sessionTenantId } from "@/lib/tenant";
 
-export default function InvitePage() {
+type Props = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<
+    string,
+    string | string[] | undefined
+  >;
+};
+
+function param(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+export default async function InvitePage({ searchParams }: Props) {
+  const session = await getServerSession(authOptions);
+  const params = (await searchParams) ?? {};
+  const token = param(params.token) || null;
+  const tenantId = sessionTenantId(session?.user?.tenantId);
+  const isOrgAdmin = session?.user?.role === "org_admin";
+
   return (
     <main
       style={{
@@ -11,23 +33,19 @@ export default function InvitePage() {
     >
       <h1 style={{ marginTop: 0 }}>Invite / membership</h1>
       <p>
-        MVP rule: an <strong>org_admin</strong> belongs to exactly one tenant.
-        A <strong>platform_owner</strong> has all-access and no tenant
-        membership row.
+        An <strong>org_admin</strong> belongs to exactly one tenant. A{" "}
+        <strong>platform_owner</strong> has all-access and no tenant membership
+        row.
       </p>
-      <p>
-        Demo seed: org admin{" "}
-        <code>admin@example.com</code> → tenant{" "}
-        <code>11111111-1111-1111-1111-111111111111</code> (demo-org). Invites
-        that would attach a second tenant are rejected by the API membership
-        helpers (single-tenant constraint).
-      </p>
-      <p style={{ color: "#555" }}>
-        Full invite email/token flow comes later — this page documents the
-        wiring for Sprint 3.
-      </p>
-      <p>
-        <Link href="/app">Back to org portal</Link> · <Link href="/login">Login</Link>
+      <InvitePanel
+        accessToken={session?.accessToken ?? null}
+        tenantId={tenantId}
+        inviteToken={token}
+        isOrgAdmin={!!isOrgAdmin}
+      />
+      <p style={{ marginTop: "1.5rem" }}>
+        <Link href="/app">Org portal</Link> · <Link href="/login">Login</Link> ·{" "}
+        <Link href="/signup">Signup</Link>
       </p>
     </main>
   );

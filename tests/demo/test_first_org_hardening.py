@@ -73,7 +73,7 @@ def test_require_entitlement_allows_active(db: Session):
     row = BillingCustomer(tenant_id=t.id, plan_status="inactive", entitlements={})
     db.add(row)
     db.flush()
-    apply_plan_state(db, row, plan_status="active", stripe_subscription_id="sub_t")
+    apply_plan_state(db, row, plan_status="active", external_subscription_id="sub_t")
     db.commit()
     require_entitlement(db, t.id, "ingest")
     assert tenant_has_entitlement(db, t.id, "ingest") is True

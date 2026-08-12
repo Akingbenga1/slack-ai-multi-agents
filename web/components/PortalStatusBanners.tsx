@@ -78,7 +78,7 @@ export function PortalStatusBanners({ accessToken, tenantId }: Props) {
             key: "unpaid",
             tone: "warn",
             title: "Plan inactive",
-            body: "Your organisation plan is not active. Pay via Stripe Checkout to enable the agent.",
+            body: "Your organisation plan is not active. Pay or manage your subscription to enable the agent.",
             href: "/app/billing",
             linkLabel: "Go to Billing",
           });

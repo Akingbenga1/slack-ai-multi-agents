@@ -46,6 +46,26 @@ def normalize_slug(raw: str) -> str:
     return slug
 
 
+def slug_from_name(name: str) -> str:
+    """Derive a URL slug from an organisation name (self-signup)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    slug = slug[:64].strip("-")
+    return normalize_slug(slug)
+
+
+def allocate_unique_slug(db: Session, base: str) -> str:
+    """Return `base` or `base-<hex>` if the slug is already taken."""
+    slug_n = normalize_slug(base)
+    if db.scalar(select(Tenant).where(Tenant.slug == slug_n)) is None:
+        return slug_n
+    stem = slug_n[:57].rstrip("-") or "org"
+    for _ in range(8):
+        candidate = f"{stem}-{uuid4().hex[:6]}"
+        if db.scalar(select(Tenant).where(Tenant.slug == candidate)) is None:
+            return candidate
+    raise OrganisationError("could not allocate a unique slug")
+
+
 def _ensure_org_admin_role(db: Session) -> Role:
     role = db.scalar(select(Role).where(Role.name == "org_admin"))
     if role is None:
@@ -87,6 +107,7 @@ def create_organisation(
     actor_email: str | None = None,
     settings: Settings | None = None,
     commit: bool = True,
+    audit_source: str = "admin_provision",
 ) -> CreatedOrganisation:
     """
     Stand up a new tenant + org admin + billing row + default agent config.
@@ -154,6 +175,8 @@ def create_organisation(
             db,
             billing,
             plan_status="active",
+            plan_source="admin",
+            override_reason="admin_provision",
             extra_meta={"source": "admin_provision"},
         )
 
@@ -168,6 +191,7 @@ def create_organisation(
             "name": name_n,
             "admin_email": email_n,
             "activate_plan": activate_plan,
+            "source": audit_source,
         },
     )
 
@@ -228,6 +252,8 @@ def ensure_organisation(
                 db,
                 billing,
                 plan_status="active",
+                plan_source="admin",
+                override_reason="admin_provision",
                 extra_meta={"source": "admin_provision"},
             )
         db.commit()

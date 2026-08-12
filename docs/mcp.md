@@ -28,7 +28,7 @@ npx -y @modelcontextprotocol/inspector uv run python -m mcp_server
 | `draft_meeting_agenda` | `client_id`, `topic` | Deterministic numbered agenda from retrieved evidence |
 | `draft_meeting_notes` | `client_id`, `topic` | Deterministic notes (decisions / actions / open Qs) from recent context |
 | `draft_report` | `client_id`, `window_label` | Recurring digest (themes / decisions / open Qs) over a window |
-| `start_onboarding` | `client_id` | Onboarding stub — always “not configured” (no invented checklist) |
+| `start_onboarding` | `client_id` | Onboarding **process** stub — always “not configured” (not tenant signup; see `docs/onboarding.md`) |
 | `rename_slack_file` | `client_id`, `new_filename` | Rename tenant org copy (+ optional Slack title); see `docs/slack-file-actions.md` |
 | `get_workflow_template` | `client_id`, `template_id` | Fetch tenant-scoped workflow library row (Sprint 24) |
 | `advise_workflow` | `client_id`, `question` | File/template-grounded operationalisation outline (+ optional RAG) |

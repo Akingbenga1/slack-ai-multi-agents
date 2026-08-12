@@ -13,9 +13,11 @@ from api.app.auth.deps import require_tenant_access
 from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.checkout import create_checkout_session
-from api.app.billing.customers import BillingError, ensure_billing_customer, get_billing_customer
+from api.app.billing.customers import ensure_billing_customer, get_billing_customer
+from api.app.billing.errors import BillingError
 from api.app.billing.portal import create_portal_session
-from api.app.billing.webhooks import WebhookError, construct_stripe_event, handle_stripe_event
+from api.app.billing.provider import get_payment_provider
+from api.app.billing.webhooks import WebhookError
 from api.app.db.session import get_db
 from api.app.logging_config import get_logger
 from api.app.settings import Settings, get_settings
@@ -27,8 +29,9 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 class BillingCustomerResponse(BaseModel):
     tenant_id: str
-    stripe_customer_id: Optional[str]
-    stripe_subscription_id: Optional[str]
+    provider: Optional[str] = None
+    external_customer_id: Optional[str]
+    external_subscription_id: Optional[str]
     plan_status: str
     entitlements: dict[str, bool]
 
@@ -41,8 +44,9 @@ def _customer_response(row) -> BillingCustomerResponse:
     ents = row.entitlements or {}
     return BillingCustomerResponse(
         tenant_id=str(row.tenant_id),
-        stripe_customer_id=row.stripe_customer_id,
-        stripe_subscription_id=row.stripe_subscription_id,
+        provider=row.provider,
+        external_customer_id=row.external_customer_id,
+        external_subscription_id=row.external_subscription_id,
         plan_status=row.plan_status,
         entitlements={k: bool(v) for k, v in ents.items()},
     )
@@ -135,15 +139,16 @@ async def stripe_webhook(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     """
-    Stripe webhook endpoint (no JWT).
+    Stripe webhook endpoint (no JWT) — adapter-owned URL kept for Dashboard config.
 
     Configure Dashboard → `{PUBLIC_BASE_URL}/billing/webhooks/stripe`.
     Events: checkout.session.completed, customer.subscription.updated|deleted.
     """
+    provider = get_payment_provider(settings)
     payload = await request.body()
     sig = request.headers.get("stripe-signature") or request.headers.get("Stripe-Signature") or ""
     try:
-        event = construct_stripe_event(payload, sig, settings)
+        event = provider.verify_webhook(payload, sig)
     except WebhookError as exc:
         msg = str(exc)
         code = (
@@ -154,7 +159,7 @@ async def stripe_webhook(
         raise HTTPException(status_code=code, detail=msg) from exc
 
     try:
-        result = handle_stripe_event(db, event)
+        result = provider.handle_webhook(db, event)
         db.commit()
     except Exception as exc:  # noqa: BLE001 — return 500 so Stripe retries
         db.rollback()

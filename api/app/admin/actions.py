@@ -9,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.app.billing.customers import ensure_billing_customer
-from api.app.billing.plans import BUDGET_KEYS
+from api.app.billing.plans import ALLOWED_PLAN_STATUSES, BUDGET_KEYS, apply_plan_state
 from api.app.db.models import AuditLog, BillingCustomer, Tenant
 from api.app.logging_config import get_logger
+from api.app.settings import Settings
 
 logger = get_logger("api.admin.actions")
 
@@ -130,6 +131,82 @@ def override_tenant_budgets(
         action="tenant.budget.override",
         tenant_id=tid,
         detail={"before": before, "after": cleaned},
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def override_tenant_plan(
+    db: Session,
+    tenant_id: UUID | str,
+    *,
+    plan_status: str,
+    reason: str,
+    actor_user_id: UUID | str | None,
+    actor_email: str | None,
+    settings: Settings | None = None,
+) -> BillingCustomer:
+    """Activate/deactivate plan for an existing tenant (admin waiver or restore Stripe control)."""
+    status_n = (plan_status or "").strip().lower()
+    if status_n not in ALLOWED_PLAN_STATUSES:
+        raise ValueError(f"plan_status must be one of {sorted(ALLOWED_PLAN_STATUSES)}")
+
+    reason_n = (reason or "").strip()
+    if not reason_n:
+        raise ValueError("reason is required")
+
+    if status_n == "active":
+        cfg = settings or Settings()
+        if not cfg.plan_waivers_permitted():
+            raise PermissionError("plan waivers are disabled (ALLOW_PLAN_WAIVERS)")
+
+    tid = UUID(str(tenant_id))
+    tenant = db.get(Tenant, tid)
+    if tenant is None:
+        raise LookupError("tenant not found")
+
+    row = ensure_billing_customer(db, tenant_id=tid, create_stripe=False)
+    before = {
+        "plan_status": row.plan_status,
+        "plan_source": row.plan_source,
+        "override_reason": row.override_reason,
+        "entitlements": dict(row.entitlements or {}),
+    }
+
+    if status_n == "active":
+        apply_plan_state(
+            db,
+            row,
+            plan_status="active",
+            plan_source="admin",
+            override_reason=reason_n,
+        )
+    else:
+        apply_plan_state(
+            db,
+            row,
+            plan_status="inactive",
+            plan_source="stripe",
+            override_reason=None,
+        )
+
+    write_audit_log(
+        db,
+        actor_user_id=actor_user_id,
+        actor_email=actor_email,
+        action="tenant.plan.override",
+        tenant_id=tid,
+        detail={
+            "before": before,
+            "after": {
+                "plan_status": row.plan_status,
+                "plan_source": row.plan_source,
+                "override_reason": row.override_reason,
+                "entitlements": dict(row.entitlements or {}),
+            },
+            "reason": reason_n,
+        },
     )
     db.commit()
     db.refresh(row)

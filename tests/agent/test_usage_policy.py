@@ -98,4 +98,4 @@ def test_compose_records_llm_tokens(db: Session):
     assert len(rows) == 1
     assert rows[0].event_type == EVENT_LLM_TOKENS
     assert rows[0].units == out["usage_tokens"]
-    assert rows[0].meta.get("model_tier") == "haiku"
+    assert rows[0].meta.get("model_tier") == "fast"

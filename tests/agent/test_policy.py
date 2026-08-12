@@ -4,10 +4,10 @@ from api.app.agent.policy import choose_model_tier, detect_complexity_flags
 from api.app.agent.nodes.route import classify_workflow
 
 
-def test_default_haiku_simple_qa():
+def test_default_fast_simple_qa():
     flags = detect_complexity_flags("What is the refund policy?", workflow="qa")
     assert flags == []
-    assert choose_model_tier(flags=flags) == "haiku"
+    assert choose_model_tier(flags=flags) == "fast"
 
 
 def test_escalate_on_compare():
@@ -16,7 +16,7 @@ def test_escalate_on_compare():
         workflow="qa",
     )
     assert "compare" in flags
-    assert choose_model_tier(flags=flags) == "sonnet"
+    assert choose_model_tier(flags=flags) == "capable"
 
 
 def test_escalate_on_summarize_workflow():
@@ -24,7 +24,7 @@ def test_escalate_on_summarize_workflow():
     assert classify_workflow(q) == "summarize"
     flags = detect_complexity_flags(q, workflow="summarize")
     assert any(f.startswith("workflow:") for f in flags)
-    assert choose_model_tier(flags=flags) == "sonnet"
+    assert choose_model_tier(flags=flags) == "capable"
 
 
 def test_classify_status():

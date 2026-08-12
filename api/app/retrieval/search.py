@@ -1,21 +1,18 @@
-"""`search_knowledge` — TEI query embed + tenant-scoped Qdrant top-k."""
+"""`search_knowledge` — query embed + tenant-scoped vector top-k."""
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Mapping
 
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
-
-from api.app.qdrant.vectors import search_vectors
-from api.app.retrieval.citations import citation_from_point
+from api.app.embedding import EmbeddingProvider, get_embedding_provider
+from api.app.retrieval.citations import citation_from_hit
 from api.app.retrieval.types import (
     KnowledgeCitation,
     KnowledgeSearchFilters,
     KnowledgeSearchResult,
 )
 from api.app.settings import Settings, get_settings
-from api.app.tei.client import TeiClient
+from api.app.vector_store import VectorStore, get_vector_store
 
 DEFAULT_TOP_K = 8
 
@@ -37,14 +34,14 @@ def search_knowledge(
     limit: int = DEFAULT_TOP_K,
     score_threshold: float | None = None,
     settings: Settings | None = None,
-    tei: TeiClient | None = None,
-    client: QdrantClient | None = None,
+    embeddings: EmbeddingProvider | None = None,
+    store: VectorStore | None = None,
     ensure_collection: bool = True,
 ) -> KnowledgeSearchResult:
     """
-    Embed ``query`` via TEI and retrieve top-k knowledge chunks for one tenant.
+    Embed ``query`` and retrieve top-k knowledge chunks for one tenant.
 
-    Always applies a fail-closed ``client_id`` Qdrant filter. Optional filters
+    Always applies a fail-closed ``client_id`` store filter. Optional filters
     (``kind``, ``channel``, ``filename``) are AND'd with that tenant filter.
     """
     settings = settings or get_settings()
@@ -54,20 +51,19 @@ def search_knowledge(
 
     top_k = max(1, int(limit))
     resolved = _resolve_filters(filters)
-    tei = tei or TeiClient(settings)
-    query_vector = tei.embed(text)[0]
+    embeddings = embeddings or get_embedding_provider(settings)
+    store = store or get_vector_store(settings)
+    query_vector = embeddings.embed(text)[0]
 
-    hits_raw = search_vectors(
+    hits_raw = store.search(
         client_id=client_id,
         query_vector=query_vector,
         limit=top_k,
         score_threshold=score_threshold,
-        extra_conditions=_filter_conditions(resolved),
-        client=client,
-        settings=settings,
+        filters=_filter_mapping(resolved),
         ensure_collection=ensure_collection,
     )
-    citations = [citation_from_point(p) for p in hits_raw]
+    citations = [citation_from_hit(h) for h in hits_raw]
     # Defense in depth: drop any hit that somehow lacks matching client_id
     cid = str(client_id).strip() if client_id is not None else ""
     safe = [c for c in citations if c.client_id == cid]
@@ -90,12 +86,12 @@ def _resolve_filters(
     return KnowledgeSearchFilters.from_mapping(filters)
 
 
-def _filter_conditions(
+def _filter_mapping(
     filters: KnowledgeSearchFilters | None,
-) -> Sequence[models.Condition] | None:
+) -> dict[str, str] | None:
     if filters is None:
         return None
-    conditions: list[models.Condition] = []
+    out: dict[str, str] = {}
     for key, value in (
         ("kind", filters.kind),
         ("channel", filters.channel),
@@ -103,10 +99,7 @@ def _filter_conditions(
     ):
         if value is None:
             continue
-        conditions.append(
-            models.FieldCondition(
-                key=key,
-                match=models.MatchValue(value=value),
-            )
-        )
-    return conditions or None
+        text = str(value).strip()
+        if text:
+            out[key] = text
+    return out or None

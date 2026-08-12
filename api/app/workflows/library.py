@@ -12,13 +12,13 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from api.app.blob_store import resolve_blob_store
 from api.app.db.models import WorkflowTemplate
 from api.app.ingest.documents import extract_document
 from api.app.ingest.documents.extract import UnsupportedDocumentFormatError
 from api.app.logging_config import get_logger
 from api.app.uploads.roles import DOCUMENT_EXTENSIONS, FileRole
 from api.app.uploads.storage import (
-    resolve_stored_path,
     sanitize_filename,
     store_upload,
 )
@@ -288,16 +288,20 @@ def store_workflow_template(
     task_id: str | None = None
     if enqueue_ingest and Path(stored.original_filename).suffix.lower() in DOCUMENT_EXTENSIONS:
         try:
-            from worker.tasks import enqueue_ingest_upload
+            from api.app.job_queue import get_job_queue
+            from worker.job_meta import KIND_INGEST_UPLOAD
 
-            async_result = enqueue_ingest_upload(
-                client_id=cid_str,
-                relative_path=stored.relative_path,
-                filename=stored.original_filename,
-                file_role=FileRole.WORKFLOW,
-                upload_id=stored.upload_id,
+            result = get_job_queue().enqueue(
+                kind=KIND_INGEST_UPLOAD,
+                tenant_id=cid_str,
+                payload={
+                    "relative_path": stored.relative_path,
+                    "filename": stored.original_filename,
+                    "file_role": str(FileRole.WORKFLOW),
+                    "upload_id": stored.upload_id,
+                },
             )
-            task_id = getattr(async_result, "id", None)
+            task_id = result.task_id
             ingested = True
             meta_out = dict(row.meta or {})
             meta_out["ingest_task_id"] = task_id
@@ -346,15 +350,15 @@ def store_from_attached_evidence(
     rel = str(evidence.get("stored_relative_path") or "").strip()
     if not rel:
         raise ValueError("attachment has no stored path")
+    store = resolve_blob_store(upload_root=upload_root)
     try:
-        absolute = resolve_stored_path(upload_root, rel, client_id=cid)
+        data = store.get(client_id=cid, key=rel)
     except ValueError as exc:
         raise PermissionError(MSG_CROSS_TENANT) from exc
-    if not absolute.is_file():
-        raise FileNotFoundError(f"stored attachment missing: {rel}")
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"stored attachment missing: {rel}") from exc
 
-    data = absolute.read_bytes()
-    filename = str(evidence.get("filename") or absolute.name)
+    filename = str(evidence.get("filename") or Path(rel).name)
     return store_workflow_template(
         db,
         client_id=cid,
@@ -391,15 +395,12 @@ def copy_template(
         raise ValueError("owner_slack_user_id is required for copy")
 
     source = get_template(db, client_id=cid_str, template_id=template_id)
-    absolute = resolve_stored_path(
-        upload_root,
-        source.storage_relative_path,
-        client_id=cid_str,
-    )
-    if not absolute.is_file():
-        raise FileNotFoundError("source workflow file missing on disk")
+    store = resolve_blob_store(upload_root=upload_root)
+    try:
+        data = store.get(client_id=cid_str, key=source.storage_relative_path)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError("source workflow file missing on disk") from exc
 
-    data = absolute.read_bytes()
     stored = store_upload(
         upload_root=upload_root,
         client_id=cid_str,

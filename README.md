@@ -59,7 +59,7 @@ Qdrant + TEI (collection, fail-closed `client_id`, embed client): `docs/qdrant-t
 Knowledge retrieval (`search_knowledge` top-k + citations): `docs/retrieval.md`.
 Slack history dump parsers + ingest CLI (ZIP / JSON / NDJSON / CSV / XLSX → TEI → Qdrant): `docs/slack-history-ingest.md`.
 Document parsers + multipart uploads + Celery ingest: `docs/document-ingest.md`, `docs/uploads.md`.
-Demo logins (Task 3.1): `owner@example.com` / `owner123` (platform_owner → `/admin`), `admin@example.com` / `admin123` (org_admin → `/app`).
+Demo logins (Task 3.1): `owner@example.com` / `owner123` (platform_owner → `/admin`), `admin@example.com` / `admin123` (org_admin → `/app`). New orgs can register at `/signup` without those credentials (`docs/portal.md`). Slack “start onboarding” is a process stub, not tenant signup (`docs/onboarding.md`).
 Platform admin portal (Sprint 21): `docs/admin-portal.md`.
 Demo readiness (Sprint 22.1): `docs/demo-readiness.md`.
 Operator runbook (Sprint 22.2): `docs/operator.md`.
@@ -105,7 +105,7 @@ uv run python scripts/seed_demo.py
 
 Postgres is published on **host port 5433** (`localhost:5433`) to avoid clashing with any local Postgres on 5432.
 
-API auth: `POST /auth/token` → Bearer JWT; `GET /auth/me`, `/auth/tenant-ping`, `/auth/membership`.
+API auth: `POST /auth/token` → Bearer JWT via `IdentityProvider` (`IDENTITY_PROVIDER=credentials` demo default); `GET /auth/me`, `/auth/tenant-ping`, `/auth/membership`.
 Jobs stub: `POST /jobs/heartbeat` (Bearer required) enqueues a tenant heartbeat — see `docs/celery.md`.
 Jobs stub: `POST /jobs/recurring-report` force-posts a digest (schedule channel or body `channel_id`) — see `docs/celery.md`.
 Live Slack sync: `POST /jobs/slack-history-sync` (on-demand); `GET`/`PATCH /jobs/slack-history-sync/schedule` (Beat enable/disable); `GET /jobs/slack-history-sync/status` (last success/failure); hourly Beat dispatcher — see `docs/celery.md`.

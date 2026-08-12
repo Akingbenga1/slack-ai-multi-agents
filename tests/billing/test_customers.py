@@ -52,7 +52,7 @@ def test_ensure_creates_local_row_without_stripe(db: Session):
     row = ensure_billing_customer(db, tenant_id=tenant.id, settings=settings)
     db.commit()
     assert row.tenant_id == tenant.id
-    assert row.stripe_customer_id is None
+    assert row.external_customer_id is None
     assert row.plan_status == "inactive"
     assert get_billing_customer(db, tenant.id) is not None
 
@@ -81,7 +81,7 @@ def test_ensure_creates_stripe_customer(db: Session, monkeypatch: pytest.MonkeyP
         email="admin@example.com",
         settings=settings,
     )
-    assert row.stripe_customer_id == "cus_test_123"
+    assert row.external_customer_id == "cus_test_123"
     create_mock.assert_called_once()
     kwargs = create_mock.call_args.kwargs
     assert kwargs["email"] == "admin@example.com"
@@ -94,7 +94,7 @@ def test_ensure_reuses_existing_stripe_id(db: Session, monkeypatch: pytest.Monke
     db.add(
         BillingCustomer(
             tenant_id=tenant.id,
-            stripe_customer_id="cus_existing",
+            external_customer_id="cus_existing",
             plan_status="inactive",
         )
     )
@@ -103,7 +103,7 @@ def test_ensure_reuses_existing_stripe_id(db: Session, monkeypatch: pytest.Monke
     monkeypatch.setattr("stripe.Customer.create", create_mock)
     settings = Settings(stripe_secret_key="sk_test_fake")
     row = ensure_billing_customer(db, tenant_id=tenant.id, settings=settings)
-    assert row.stripe_customer_id == "cus_existing"
+    assert row.external_customer_id == "cus_existing"
     create_mock.assert_not_called()
 
 

@@ -15,6 +15,7 @@ from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.plans import require_entitlement
 from api.app.db.session import get_db
 from api.app.governance.budgets import require_budget
+from api.app.job_queue import get_job_queue
 from api.app.reports.schedule import (
     get_recurring_report_schedule,
     normalize_cadence,
@@ -25,11 +26,10 @@ from api.app.slack.schedule import (
     set_slack_history_sync_enabled,
 )
 from api.app.slack.sync_status import get_slack_history_sync_status
-from worker.queues import queue_for_priority
-from worker.tasks import (
-    enqueue_heartbeat,
-    enqueue_recurring_report,
-    enqueue_slack_history_sync,
+from worker.job_meta import (
+    KIND_HEARTBEAT,
+    KIND_RECURRING_REPORT,
+    KIND_SLACK_HISTORY_SYNC,
 )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -184,19 +184,19 @@ def enqueue_tenant_heartbeat(
     """
     Internal stub: enqueue a tenant heartbeat job (auth required).
 
-    Does not wait for the worker; returns Celery task id immediately.
+    Does not wait for the worker; returns the enqueue task id immediately.
     """
     client_id = _resolve_enqueue_tenant(principal, body.tenant_id)
     require_budget(db, client_id, "jobs", units=1)
-    async_result = enqueue_heartbeat(
-        client_id=client_id,
-        message=body.message,
-        priority=body.priority,
+    result = get_job_queue().enqueue(
+        kind=KIND_HEARTBEAT,
+        tenant_id=client_id,
+        payload={"message": body.message, "priority": body.priority},
     )
     return HeartbeatEnqueueResponse(
-        task_id=async_result.id,
+        task_id=result.task_id,
         client_id=client_id,
-        queue=queue_for_priority(body.priority),
+        queue=result.queue,
     )
 
 
@@ -210,20 +210,20 @@ def enqueue_tenant_slack_history_sync(
     On-demand live Slack history sync (auth required).
 
     Bypasses Beat enable/disable; always enqueues for the caller's tenant.
-    Does not wait for the worker; returns Celery task id immediately.
+    Does not wait for the worker; returns the enqueue task id immediately.
     """
     client_id = _resolve_enqueue_tenant(principal, body.tenant_id)
     require_entitlement(db, client_id, "sync")
     require_budget(db, client_id, "jobs", units=1, require_active_plan=True)
-    async_result = enqueue_slack_history_sync(
-        client_id=client_id,
-        channel_ids=body.channel_ids,
-        priority=body.priority,
+    result = get_job_queue().enqueue(
+        kind=KIND_SLACK_HISTORY_SYNC,
+        tenant_id=client_id,
+        payload={"channel_ids": body.channel_ids, "priority": body.priority},
     )
     return SlackHistorySyncEnqueueResponse(
-        task_id=async_result.id,
+        task_id=result.task_id,
         client_id=client_id,
-        queue=queue_for_priority(body.priority),
+        queue=result.queue,
     )
 
 
@@ -369,16 +369,19 @@ def enqueue_tenant_recurring_report(
         )
     require_entitlement(db, client_id, "agent")
     require_budget(db, client_id, "jobs", units=1, require_active_plan=True)
-    async_result = enqueue_recurring_report(
-        client_id=client_id,
-        channel_id=channel,
-        window_label=body.window_label or sched.get("window_label"),
-        prefer_sync=body.prefer_sync,
-        force=True,
-        priority=body.priority,
+    result = get_job_queue().enqueue(
+        kind=KIND_RECURRING_REPORT,
+        tenant_id=client_id,
+        payload={
+            "channel_id": channel,
+            "window_label": body.window_label or sched.get("window_label"),
+            "prefer_sync": body.prefer_sync,
+            "force": True,
+            "priority": body.priority,
+        },
     )
     return RecurringReportEnqueueResponse(
-        task_id=async_result.id,
+        task_id=result.task_id,
         client_id=client_id,
-        queue=queue_for_priority(body.priority),
+        queue=result.queue,
     )

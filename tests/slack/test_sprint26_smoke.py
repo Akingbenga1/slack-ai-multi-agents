@@ -69,13 +69,13 @@ def _tenant_active(db: Session) -> Tenant:
     db.flush()
     row = BillingCustomer(
         tenant_id=t.id,
-        stripe_customer_id=f"cus_{uuid4().hex[:8]}",
+        external_customer_id=f"cus_{uuid4().hex[:8]}",
         plan_status="inactive",
         entitlements={},
     )
     db.add(row)
     db.flush()
-    apply_plan_state(db, row, plan_status="active", stripe_subscription_id="sub_s26")
+    apply_plan_state(db, row, plan_status="active", external_subscription_id="sub_s26")
     db.commit()
     return t
 

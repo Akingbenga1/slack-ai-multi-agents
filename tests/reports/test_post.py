@@ -180,6 +180,7 @@ def test_post_requires_channel(monkeypatch: pytest.MonkeyPatch):
 def test_dispatch_enqueues_due_tenants(monkeypatch: pytest.MonkeyPatch):
     from worker import tasks as worker_tasks
 
+    from api.app.job_queue import EnqueueResult
     from tests.schedules.helpers import FakeScheduleDB
 
     t1 = uuid4()
@@ -201,15 +202,23 @@ def test_dispatch_enqueues_due_tenants(monkeypatch: pytest.MonkeyPatch):
         ],
     )
 
-    class _R:
-        def __init__(self, tid: str):
-            self.id = f"task-{tid[:8]}"
+    class _FakeQueue:
+        name = "celery"
 
-    def fake_enqueue(**kwargs):
-        enqueued.append(kwargs)
-        return _R(kwargs["client_id"])
+        def enqueue(self, *, kind: str, tenant_id: str, payload=None):
+            data = dict(payload or {})
+            data["client_id"] = tenant_id
+            enqueued.append(data)
+            return EnqueueResult(
+                task_id=f"task-{tenant_id[:8]}",
+                queue="default",
+                kind=kind,
+            )
 
-    monkeypatch.setattr(worker_tasks, "enqueue_recurring_report", fake_enqueue)
+    monkeypatch.setattr(
+        "api.app.job_queue.get_job_queue",
+        lambda: _FakeQueue(),
+    )
     result = worker_tasks.dispatch_recurring_reports.run(cadence="weekly")
     assert result["count"] == 1
     assert enqueued[0]["channel_id"] == "C9"

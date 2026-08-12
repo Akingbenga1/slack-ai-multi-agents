@@ -1,4 +1,4 @@
-"""Helpers for retrieval tests — in-memory Qdrant + stub TEI."""
+"""Helpers for retrieval tests — in-memory Qdrant + stub embeddings."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 from qdrant_client import QdrantClient
 
 from api.app.settings import Settings
+from api.app.vector_store import QdrantVectorStore
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "knowledge"
 TENANT_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -20,6 +21,8 @@ def memory_settings(**overrides) -> Settings:
         "qdrant_collection": "knowledge_test",
         "qdrant_url": "http://localhost:6333",
         "tei_url": "http://localhost:8080",
+        "vector_store": "qdrant",
+        "embedding_provider": "tei",
     }
     base.update(overrides)
     return Settings(**base)
@@ -29,6 +32,11 @@ def memory_client() -> QdrantClient:
     return QdrantClient(":memory:")
 
 
+def memory_store(settings: Settings | None = None, client: QdrantClient | None = None) -> QdrantVectorStore:
+    settings = settings or memory_settings()
+    return QdrantVectorStore(settings, client=client or memory_client())
+
+
 def unit_vector(hot_index: int, dim: int = DIM) -> list[float]:
     v = [0.0] * dim
     v[hot_index % dim] = 1.0
@@ -36,7 +44,11 @@ def unit_vector(hot_index: int, dim: int = DIM) -> list[float]:
 
 
 class StubTei:
-    """TEI stand-in: maps query substrings to fixed vectors."""
+    """EmbeddingProvider stand-in: maps query substrings to fixed vectors."""
+
+    name = "stub"
+    model_id = "stub"
+    dim = DIM
 
     def __init__(
         self,

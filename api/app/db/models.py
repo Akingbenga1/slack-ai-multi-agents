@@ -162,9 +162,16 @@ class BillingCustomer(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"), unique=True, index=True
     )
-    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
-    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Sprint 34.2 — provider-neutral gateway ids (Stripe was the first adapter)
+    provider: Mapped[str] = mapped_column(String(32), default="stripe")
+    external_customer_id: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    external_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     plan_status: Mapped[str] = mapped_column(String(32), default="inactive")
+    # Sprint 32.1 — admin waiver vs payment-gateway-managed plan (webhooks honour admin lock)
+    plan_source: Mapped[str] = mapped_column(String(16), default="stripe")
+    override_reason: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     # Sprint 11.5 — product flags gated by plan (agent replies, ingest, sync)
     entitlements: Mapped[dict] = mapped_column(JSONB, default=dict)
     meta: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
@@ -172,6 +179,28 @@ class BillingCustomer(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Invite(Base):
+    """Tokenised org-admin invite (Sprint 31.3). SMTP is out of scope."""
+
+    __tablename__ = "invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(64), default="org_admin")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    tenant: Mapped[Tenant] = relationship()
 
 
 class AuditLog(Base):

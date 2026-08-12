@@ -59,7 +59,7 @@ def test_run_agent_accepts_deps_bag():
     )
     assert out["workflow"] == "qa"
     assert out["hedge"] is False
-    assert "stub:haiku" in out["answer"]
+    assert "stub:fast" in out["answer"]
 
 
 def test_build_agent_graph_from_deps():

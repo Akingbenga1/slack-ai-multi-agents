@@ -8,14 +8,33 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from api.app.admin.provision import OrganisationError
 from api.app.auth.deps import get_current_principal, require_tenant_access
+from api.app.auth.invites import (
+    InviteError,
+    accept_invite,
+    create_invite,
+    invite_public_row,
+    list_invites,
+    preview_invite,
+)
+from api.app.auth.provider import get_identity_provider
+from api.app.auth.signup import register_organisation
 from api.app.auth.tokens import AuthPrincipal, RoleName, create_access_token
 from api.app.db.models import Membership
 from api.app.db.session import get_db
-from api.app.membership import resolve_login_principal
 from api.app.settings import Settings, get_settings
+from api.app.tenant import get_client_id, set_client_id
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class SignupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    slug: Optional[str] = Field(default=None, max_length=64)
+    display_name: Optional[str] = Field(default=None, max_length=255)
 
 
 class TokenRequest(BaseModel):
@@ -45,13 +64,97 @@ class TenantPingResponse(BaseModel):
     role: RoleName
 
 
+class CreateInviteBody(BaseModel):
+    email: EmailStr
+
+
+class AcceptInviteBody(BaseModel):
+    token: str = Field(min_length=8, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: Optional[str] = Field(default=None, max_length=255)
+
+
+def _organisation_http_error(exc: OrganisationError) -> HTTPException:
+    msg = str(exc)
+    code = (
+        status.HTTP_409_CONFLICT
+        if "already exists" in msg
+        else status.HTTP_400_BAD_REQUEST
+    )
+    return HTTPException(status_code=code, detail=msg)
+
+
+def _invite_http_error(exc: InviteError) -> HTTPException:
+    msg = str(exc)
+    if "not found" in msg:
+        code = status.HTTP_404_NOT_FOUND
+    elif "already" in msg:
+        code = status.HTTP_409_CONFLICT
+    else:
+        code = status.HTTP_400_BAD_REQUEST
+    return HTTPException(status_code=code, detail=msg)
+
+
+def _org_tenant_id(principal: AuthPrincipal) -> str:
+    raw = get_client_id() or principal.tenant_id
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant required",
+        )
+    return str(UUID(raw))
+
+
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
+def signup(
+    body: SignupRequest,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict:
+    """Public org registration — tenant + admin + session; no platform-owner ticket."""
+    try:
+        result = register_organisation(
+            db,
+            name=body.name,
+            email=str(body.email),
+            password=body.password,
+            slug=body.slug,
+            display_name=body.display_name,
+            settings=settings,
+        )
+    except OrganisationError as exc:
+        raise _organisation_http_error(exc) from exc
+
+    org = result.organisation
+    set_client_id(str(org.tenant.id))
+    return {
+        "access_token": result.access_token,
+        "token_type": "bearer",
+        "role": "org_admin",
+        "tenant_id": str(org.tenant.id),
+        "all_access": False,
+        "tenant": {
+            "id": str(org.tenant.id),
+            "slug": org.tenant.slug,
+            "name": org.tenant.name,
+        },
+        "admin": {
+            "id": str(org.admin.id),
+            "email": org.admin.email,
+            "display_name": org.admin.display_name,
+        },
+    }
+
+
 @router.post("/token", response_model=TokenResponse)
 def issue_token(
     body: TokenRequest,
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TokenResponse:
-    principal = resolve_login_principal(db, email=body.email, password=body.password)
+    """Mint JWT after IdentityProvider.verify — IdP is selected by IDENTITY_PROVIDER."""
+    idp = get_identity_provider(settings)
+    principal = idp.verify(db, email=str(body.email), password=body.password)
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
@@ -129,4 +232,92 @@ def membership_info(
             }
             for m in rows
         ],
+    }
+
+
+@router.post("/invites", status_code=status.HTTP_201_CREATED)
+def create_org_invite(
+    body: CreateInviteBody,
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict:
+    """Org admin creates a copyable magic-link invite (no SMTP)."""
+    tenant_id = _org_tenant_id(principal)
+    try:
+        created = create_invite(
+            db,
+            tenant_id=tenant_id,
+            email=str(body.email),
+            actor_user_id=principal.sub,
+            actor_email=principal.email,
+            settings=settings,
+        )
+    except InviteError as exc:
+        raise _invite_http_error(exc) from exc
+    payload = invite_public_row(created.invite)
+    payload["invite_url"] = created.invite_url
+    payload["token"] = created.raw_token
+    payload["note"] = (
+        "Copy invite_url now. Email delivery is out of scope; token is not stored in plaintext."
+    )
+    return payload
+
+
+@router.get("/invites")
+def list_org_invites(
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    tenant_id = _org_tenant_id(principal)
+    rows = list_invites(db, tenant_id=tenant_id)
+    return {"invites": [invite_public_row(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/invites/preview")
+def preview_org_invite(
+    token: str,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict:
+    try:
+        return preview_invite(db, token=token, settings=settings)
+    except InviteError as exc:
+        raise _invite_http_error(exc) from exc
+
+
+@router.post("/invites/accept", status_code=status.HTTP_201_CREATED)
+def accept_org_invite(
+    body: AcceptInviteBody,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict:
+    """Join the existing tenant. Does not create a second organisation."""
+    try:
+        accepted = accept_invite(
+            db,
+            token=body.token,
+            password=body.password,
+            display_name=body.display_name,
+            settings=settings,
+        )
+    except InviteError as exc:
+        raise _invite_http_error(exc) from exc
+    set_client_id(str(accepted.tenant.id))
+    return {
+        "access_token": accepted.access_token,
+        "token_type": "bearer",
+        "role": "org_admin",
+        "tenant_id": str(accepted.tenant.id),
+        "all_access": False,
+        "tenant": {
+            "id": str(accepted.tenant.id),
+            "slug": accepted.tenant.slug,
+            "name": accepted.tenant.name,
+        },
+        "admin": {
+            "id": str(accepted.user.id),
+            "email": accepted.user.email,
+            "display_name": accepted.user.display_name,
+        },
     }

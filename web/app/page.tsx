@@ -46,6 +46,8 @@ export default async function Home() {
       ) : (
         <p style={{ margin: 0 }}>
           <Link href="/login">Sign in</Link>
+          {" · "}
+          <Link href="/signup">Create organisation</Link>
         </p>
       )}
     </main>

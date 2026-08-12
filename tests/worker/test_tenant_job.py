@@ -109,6 +109,8 @@ def test_ingest_pipelines_delegate_to_shared_chunks_core():
     ).read_text(encoding="utf-8")
     assert "ingest_chunks(" in slack
     assert "ingest_chunks(" in docs
-    assert "upsert_vectors(" in core
+    assert "store.upsert(" in core
+    assert "get_vector_store" in core or "VectorStore" in core
     assert "upsert_vectors(" not in slack
     assert "upsert_vectors(" not in docs
+    assert "upsert_vectors(" not in core

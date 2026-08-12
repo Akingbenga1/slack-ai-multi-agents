@@ -1,4 +1,4 @@
-"""Chunk → TEI → Qdrant ingest for normalized Slack history."""
+"""Chunk → embed → vector-store ingest for normalized Slack history."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
+from api.app.embedding import EmbeddingProvider
 from api.app.ingest.chunk import MessageChunk, chunk_messages
 from api.app.ingest.chunks_ingest import DEFAULT_EMBED_BATCH, ingest_chunks
 from api.app.ingest.schema import NormalizedMessage
 from api.app.settings import Settings
-from api.app.tei.client import TeiClient
+from api.app.vector_store import VectorStore
 
 __all__ = [
     "DEFAULT_EMBED_BATCH",
@@ -23,7 +24,7 @@ __all__ = [
 
 def point_id_for_chunk(client_id: str, chunk: MessageChunk) -> str:
     """
-    Deterministic Qdrant point UUID (uuid5) for idempotent upserts.
+    Deterministic knowledge point UUID (uuid5) for idempotent upserts.
 
     Keyed by tenant + channel + ts + chunk_index (not content hash), so
     re-ingest of the same message overwrites the same points.
@@ -66,15 +67,16 @@ def ingest_messages(
     client_id: str,
     messages: Sequence[NormalizedMessage] | Iterable[NormalizedMessage],
     settings: Settings | None = None,
-    tei: TeiClient | None = None,
+    embeddings: EmbeddingProvider | None = None,
+    store: VectorStore | None = None,
     embed_batch_size: int = DEFAULT_EMBED_BATCH,
     max_chars: int = 1500,
     overlap: int = 100,
 ) -> IngestResult:
     """
-    Chunk messages, embed via TEI, upsert into the knowledge collection.
+    Chunk messages, embed, upsert into the knowledge collection.
 
-    Requires a non-empty ``client_id`` (fail-closed at Qdrant helpers).
+    Requires a non-empty ``client_id`` (fail-closed at the vector store).
     """
     msg_list = list(messages)
     chunks = chunk_messages(msg_list, max_chars=max_chars, overlap=overlap)
@@ -87,7 +89,8 @@ def ingest_messages(
         point_id_fn=point_id_for_chunk,
         payload_fn=chunk_payload,
         settings=settings,
-        tei=tei,
+        embeddings=embeddings,
+        store=store,
         embed_batch_size=embed_batch_size,
     )
     return IngestResult(

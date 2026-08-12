@@ -1,4 +1,4 @@
-"""Stripe Checkout Session helpers."""
+"""Checkout session helpers — product facade over ``PaymentProvider``."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from api.app.billing.customers import BillingError, ensure_billing_customer
-from api.app.billing.stripe_client import configure_stripe, stripe_configured
+from api.app.billing.customers import ensure_billing_customer
+from api.app.billing.errors import BillingError
+from api.app.billing.provider import get_payment_provider
 from api.app.settings import Settings
 
 
@@ -19,12 +20,13 @@ def create_checkout_session(
     settings: Settings,
 ) -> str:
     """
-    Ensure Stripe customer, create a subscription Checkout Session, return hosted URL.
+    Ensure gateway customer, create a subscription checkout session, return hosted URL.
     """
-    if not stripe_configured(settings):
+    provider = get_payment_provider(settings)
+    if not provider.is_configured():
         raise BillingError("STRIPE_SECRET_KEY is not set")
-    price_id = (settings.stripe_price_id or "").strip()
-    if not price_id:
+    # Fail closed on missing price before any gateway customer create (Stripe adapter secret)
+    if provider.name == "stripe" and not (settings.stripe_price_id or "").strip():
         raise BillingError("STRIPE_PRICE_ID is not set")
 
     row = ensure_billing_customer(
@@ -32,39 +34,16 @@ def create_checkout_session(
         tenant_id=tenant_id,
         email=email,
         settings=settings,
-        create_stripe=True,
+        create_external=True,
     )
-    if not row.stripe_customer_id:
-        raise BillingError("Stripe customer could not be created")
+    external_id = row.external_customer_id
+    if not external_id:
+        raise BillingError("Payment customer could not be created")
 
     web = (settings.web_app_url or "http://localhost:3000").rstrip("/")
-    configure_stripe(settings)
-
-    import stripe
-
-    try:
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            customer=row.stripe_customer_id,
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=f"{web}/app/billing?checkout=success",
-            cancel_url=f"{web}/app/billing?checkout=cancel",
-            client_reference_id=str(row.tenant_id),
-            metadata={
-                "tenant_id": str(row.tenant_id),
-                "client_id": str(row.tenant_id),
-            },
-            subscription_data={
-                "metadata": {
-                    "tenant_id": str(row.tenant_id),
-                    "client_id": str(row.tenant_id),
-                },
-            },
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise BillingError(f"Stripe Checkout Session.create failed: {exc}") from exc
-
-    url = getattr(session, "url", None) or (session.get("url") if isinstance(session, dict) else None)
-    if not url:
-        raise BillingError("Stripe Checkout Session returned no url")
-    return str(url)
+    return provider.create_checkout_url(
+        external_customer_id=external_id,
+        tenant_id=row.tenant_id,
+        success_url=f"{web}/app/billing?checkout=success",
+        cancel_url=f"{web}/app/billing?checkout=cancel",
+    )

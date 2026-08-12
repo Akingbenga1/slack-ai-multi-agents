@@ -151,7 +151,7 @@ def test_run_agent_tools_node_via_mcp_inject():
     assert out["hedge"] is False
     assert len(out["retrieved_chunks"]) == 1
     assert out["retrieved_chunks"][0]["client_id"] == TENANT
-    assert "stub:haiku" in out["answer"]
+    assert "stub:fast" in out["answer"]
 
 
 def test_search_knowledge_via_mcp_sync_inject():

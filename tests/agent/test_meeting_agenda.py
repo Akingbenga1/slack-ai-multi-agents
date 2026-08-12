@@ -84,14 +84,14 @@ def test_compose_uses_agenda_prompt():
                 }
             ],
             "workflow": "meeting_agenda",
-            "model_tier": "sonnet",
+            "model_tier": "capable",
             "question": "Draft an agenda for hiring",
             "meeting_draft": "# Meeting agenda: hiring\n\n1. **Open / goals**\n",
         }
     )
     assert out["hedge"] is False
     assert seen["system"] == SYSTEM_MEETING_AGENDA
-    assert seen["tier"] == "sonnet"
+    assert seen["tier"] == "capable"
     assert "Draft outline:" in seen["user"]
 
 
@@ -123,9 +123,9 @@ def test_run_agent_meeting_agenda_via_mcp():
         record_usage=False,
     )
     assert out["workflow"] == "meeting_agenda"
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert calls == ["draft_meeting_agenda"]
     assert out["hedge"] is False
     assert out["meeting_draft"]
     assert "Meeting agenda" in out["meeting_draft"]
-    assert "stub:sonnet" in out["answer"]
+    assert "stub:capable" in out["answer"]

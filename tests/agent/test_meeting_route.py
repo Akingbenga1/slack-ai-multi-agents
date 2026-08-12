@@ -53,7 +53,7 @@ def test_non_meeting_unchanged():
     assert classify_workflow("Who said we should delay?") == "status"
 
 
-def test_meeting_workflows_escalate_sonnet():
+def test_meeting_workflows_escalate_capable():
     for wf, q in (
         ("meeting_brief", "Brief me for the launch sync"),
         ("meeting_agenda", "Draft an agenda for kickoff"),
@@ -62,7 +62,7 @@ def test_meeting_workflows_escalate_sonnet():
         assert classify_workflow(q) == wf
         flags = detect_complexity_flags(q, workflow=wf)
         assert f"workflow:{wf}" in flags
-        assert choose_model_tier(flags=flags) == "sonnet"
+        assert choose_model_tier(flags=flags) == "capable"
 
 
 def test_meeting_system_prompts():

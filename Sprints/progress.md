@@ -1,9 +1,9 @@
 # Project progress (Ralph loop)
 
-- **Active sprint:** Sprint 30 (complete)
-- **Last completed task:** 30.4
-- **Current / next task:** none — pattern-upgrade sprints (25–30) finished per `jira-task.md`
-- **Batch in progress:** none (Sprint 30 / Task 30.4 verification done)
+- **Active sprint:** Sprint 39 (agent-runtime adapter) — **complete**
+- **Last completed task:** 39.3
+- **Current / next task:** none in active vendor track (Sprint 40 deferred)
+- **Batch in progress:** none (39.1–39.3 done this session — Sprint 39 complete)
 
 - **Open Needs human:**
 
@@ -17,7 +17,7 @@
 
   - Stripe test keys (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`) + Customer Portal + webhook URL + live Checkout/Portal activate/deactivate (`docs/billing.md`; journals 11.1–11.5) — needed for active plan before Slack agent answers
 
-  - Optional: `ANTHROPIC_API_KEY` for live (non-stub) agent compose (`docs/agent.md`; journals 13.1–13.4, 14.4)
+  - Optional: live chat compose — `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=ollama` + local Ollama; offline dry-runs use `LLM_PROVIDER=stub` (`docs/agent.md`; journals 13.1–13.4, 33.1–33.4)
 
   - Recurring report live verify: set `/jobs/recurring-report/schedule` channel + `POST /jobs/recurring-report` (or Beat) → message in channel (Sprint 17 exit)
 
@@ -31,4 +31,8 @@
 
   - Optional: second-org live Slack workspace install after `POST /admin/tenants` / `scripts/second_org_smoke.py` (`docs/demo-readiness.md`)
 
-- **Active sprint folder:** `Sprints/Sprint 30/`
+  - Optional: apply `alembic upgrade head` (`f6a2c43d0e51` invites; `a8f3b12c4d56` plan_source; `c1d4e85a9f70` billing provider ids) then live `/signup` + `/invite` + admin plan override + billing against local API + Next.js
+
+  - Optional: copy `IDENTITY_PROVIDER=credentials` into `web/.env.local` (shared with API; demo default)
+
+- **Active sprint folder:** `Sprints/Sprint 39/`

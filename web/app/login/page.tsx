@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { signIn } from "next-auth/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -83,6 +84,9 @@ export default function LoginPage() {
         <button type="submit" disabled={pending} style={{ padding: "0.6rem" }}>
           {pending ? "Signing in…" : "Sign in"}
         </button>
+        <p style={{ margin: 0, fontSize: "0.9rem" }}>
+          New organisation? <Link href="/signup">Create an account</Link>
+        </p>
       </form>
     </main>
   );

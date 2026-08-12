@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from api.app.blob_store import resolve_blob_store
+from api.app.blob_store.provider import BlobStore
 from api.app.logging_config import get_logger
 from api.app.slack.client import SlackApiError, SlackWebClient
 from api.app.slack.files.refs import (
@@ -13,7 +15,7 @@ from api.app.slack.files.refs import (
     first_usable_evidence,
     require_client_id,
 )
-from api.app.uploads.storage import resolve_stored_path, sanitize_filename
+from api.app.uploads.storage import sanitize_filename
 
 logger = get_logger("api.slack.files.rename")
 
@@ -79,12 +81,13 @@ def parse_requested_filename(
 def rename_stored_org_copy(
     *,
     client_id: str,
-    upload_root: Path,
+    upload_root: Path | None = None,
     stored_relative_path: str,
     new_filename: str,
+    blob_store: BlobStore | None = None,
 ) -> dict[str, Any]:
     """
-    Rename a tenant-scoped stored file on disk. Fail-closed on path escape /
+    Rename a tenant-scoped stored blob. Fail-closed on path escape /
     wrong tenant prefix.
     """
     cid = require_client_id(client_id)
@@ -96,12 +99,13 @@ def rename_stored_org_copy(
     if not safe_new:
         raise ValueError("new_filename is required")
 
+    store = resolve_blob_store(upload_root=upload_root, blob_store=blob_store)
     # Tenant-bound resolve rejects ``..`` / cross-tenant prefixes.
-    absolute = resolve_stored_path(upload_root, rel, client_id=cid)
-    if not absolute.is_file():
-        raise FileNotFoundError(f"stored file missing: {rel}")
+    canonical = store.resolve(client_id=cid, key=rel)
+    # Probe existence via get (raises FileNotFoundError if missing).
+    store.get(client_id=cid, key=canonical)
 
-    old_name = absolute.name
+    old_name = Path(canonical).name
     # Preserve upload_id_ prefix when present (uuid_original.ext)
     parts = old_name.split("_", 1)
     if len(parts) == 2 and len(parts[0]) >= 8:
@@ -109,17 +113,10 @@ def rename_stored_org_copy(
     else:
         stored_filename = safe_new
 
-    dest = absolute.with_name(stored_filename)
-    if dest.resolve() != absolute.resolve():
-        dest_resolved = dest.resolve()
-        tenant_root = (Path(upload_root).resolve() / cid).resolve()
-        if not dest_resolved.is_relative_to(tenant_root):
-            raise ValueError("rename would escape tenant upload root")
-        if dest.exists():
-            raise FileExistsError(f"target already exists: {stored_filename}")
-        absolute.rename(dest)
-
     new_rel = f"{cid}/{stored_filename}"
+    if new_rel != canonical:
+        store.rename(client_id=cid, key=canonical, new_key=new_rel)
+
     return {
         "ok": True,
         "old_relative_path": rel,

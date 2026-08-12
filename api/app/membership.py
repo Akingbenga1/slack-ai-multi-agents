@@ -257,6 +257,8 @@ def ensure_demo_memberships(db: Session) -> None:
             db,
             billing,
             plan_status="active",
+            plan_source="admin",
+            override_reason="demo_seed",
             extra_meta={"source": "demo_seed"},
         )
 

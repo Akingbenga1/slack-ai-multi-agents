@@ -97,7 +97,7 @@ def test_compose_uses_report_prompt():
                 }
             ],
             "workflow": "report",
-            "model_tier": "sonnet",
+            "model_tier": "capable",
             "question": "Recurring report for last 7 days",
             "report_window": "last 7 days",
             "meeting_draft": "# Recurring report\n\n## Themes\n",
@@ -105,7 +105,7 @@ def test_compose_uses_report_prompt():
     )
     assert out["hedge"] is False
     assert seen["system"] == SYSTEM_REPORT
-    assert seen["tier"] == "sonnet"
+    assert seen["tier"] == "capable"
     assert "Report window: last 7 days" in seen["user"]
     assert "Draft outline:" in seen["user"]
 
@@ -171,7 +171,7 @@ def test_run_report_via_mcp():
         record_usage=False,
     )
     assert out["workflow"] == "report"
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert out["report_window"] == "last 7 days"
     assert out["report_channel"] == "C_REPORT"
     assert out["hedge"] is False
@@ -202,5 +202,5 @@ def test_run_agent_classifies_weekly_report():
         record_usage=False,
     )
     assert out["workflow"] == "report"
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert out["hedge"] is False

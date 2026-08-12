@@ -45,7 +45,7 @@ def _row(db: Session, *, customer_id: str = "cus_1") -> BillingCustomer:
     db.flush()
     row = BillingCustomer(
         tenant_id=t.id,
-        stripe_customer_id=customer_id,
+        external_customer_id=customer_id,
         plan_status="inactive",
         meta={},
     )
@@ -85,7 +85,7 @@ def test_checkout_completed_activates(db: Session):
     assert result["handled"] is True
     db.refresh(row)
     assert row.plan_status == "active"
-    assert row.stripe_subscription_id == "sub_1"
+    assert row.external_subscription_id == "sub_1"
     assert row.entitlements.get("agent") is True
     assert row.entitlements.get("ingest") is True
     assert row.entitlements.get("sync") is True
@@ -94,7 +94,7 @@ def test_checkout_completed_activates(db: Session):
 def test_subscription_updated_deactivates_when_canceled(db: Session):
     row = _row(db)
     row.plan_status = "active"
-    row.stripe_subscription_id = "sub_1"
+    row.external_subscription_id = "sub_1"
     db.flush()
     event = {
         "type": "customer.subscription.updated",
@@ -116,7 +116,7 @@ def test_subscription_updated_deactivates_when_canceled(db: Session):
 def test_subscription_deleted_clears_subscription(db: Session):
     row = _row(db)
     row.plan_status = "active"
-    row.stripe_subscription_id = "sub_1"
+    row.external_subscription_id = "sub_1"
     db.flush()
     event = {
         "type": "customer.subscription.deleted",
@@ -133,13 +133,40 @@ def test_subscription_deleted_clears_subscription(db: Session):
     assert result["handled"] is True
     db.refresh(row)
     assert row.plan_status == "inactive"
-    assert row.stripe_subscription_id is None
+    assert row.external_subscription_id is None
     assert row.entitlements.get("agent") is False
 
 
 def test_unknown_event_ignored(db: Session):
     result = handle_stripe_event(db, {"type": "invoice.paid", "data": {"object": {}}})
     assert result["handled"] is False
+
+
+def test_webhook_skips_admin_locked_plan(db: Session):
+    row = _row(db)
+    row.plan_status = "active"
+    row.plan_source = "admin"
+    row.override_reason = "operator waiver"
+    row.external_subscription_id = "sub_1"
+    db.flush()
+    event = {
+        "type": "customer.subscription.deleted",
+        "data": {
+            "object": {
+                "id": "sub_1",
+                "customer": "cus_1",
+                "status": "canceled",
+                "metadata": {},
+            }
+        },
+    }
+    result = handle_stripe_event(db, event)
+    assert result["handled"] is False
+    assert result["reason"] == "admin_plan_lock"
+    db.refresh(row)
+    assert row.plan_status == "active"
+    assert row.plan_source == "admin"
+    assert row.external_subscription_id == "sub_1"
 
 
 def test_construct_event_delegates_to_stripe(monkeypatch: pytest.MonkeyPatch):

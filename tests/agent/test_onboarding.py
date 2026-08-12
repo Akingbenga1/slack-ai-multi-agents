@@ -37,12 +37,12 @@ def test_onboarding_knowledge_qa_stays_qa():
     )
 
 
-def test_onboarding_does_not_escalate_sonnet():
+def test_onboarding_does_not_escalate_capable():
     q = "Start onboarding"
     assert classify_workflow(q) == "onboarding"
     flags = detect_complexity_flags(q, workflow="onboarding")
     assert "workflow:onboarding" not in flags
-    assert choose_model_tier(flags=flags) == "haiku"
+    assert choose_model_tier(flags=flags) == "fast"
 
 
 def test_run_agent_onboarding_stub():

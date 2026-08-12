@@ -94,7 +94,7 @@ def test_retrieve_drops_foreign_hits_from_search():
     assert len(out["retrieved_chunks"]) == 1
     assert out["retrieved_chunks"][0]["client_id"] == TENANT
     assert "SECRET" not in out["answer"]
-    assert "Refunds" in out["answer"] or "stub:haiku" in out["answer"]
+    assert "Refunds" in out["answer"] or "stub:fast" in out["answer"]
 
 
 def test_hard_hedge_when_only_weak_scores():
@@ -162,7 +162,7 @@ def test_missing_client_id_raises_before_search():
                 "question": "hi",
                 "retrieved_chunks": [],
                 "workflow": "qa",
-                "model_tier": "haiku",
+                "model_tier": "fast",
             },
             {"configurable": {"thread_id": "x"}},
         )
@@ -207,4 +207,4 @@ def test_grounded_dry_run_answers_for_one_tenant():
     assert "30 days" in out["retrieved_chunks"][0]["text"]
     assert out["answer"]
     assert out["answer"] != HEDGE_MESSAGE
-    assert "stub:haiku" in out["answer"]
+    assert "stub:fast" in out["answer"]

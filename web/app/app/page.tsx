@@ -37,8 +37,7 @@ export default async function OrgAppHome() {
           Slack (copy / draft)
         </li>
         <li>
-          <Link href="/app/billing">Billing</Link> — Stripe Checkout / Customer
-          Portal
+          <Link href="/app/billing">Billing</Link> — pay / manage subscription
         </li>
         <li>
           <Link href="/app/usage">Usage</Link> — mentions, jobs, tokens, budgets

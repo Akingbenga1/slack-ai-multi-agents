@@ -13,6 +13,8 @@ from api.app.logging_config import get_logger
 
 logger = get_logger("api.billing.plans")
 
+_UNSET = object()
+
 # Stripe subscription statuses that grant product access
 _ACTIVE_STATUSES = frozenset({"active", "trialing"})
 
@@ -37,6 +39,14 @@ INACTIVE_ENTITLEMENTS: dict[str, bool | int] = {
 }
 
 BUDGET_KEYS = frozenset({"tokens_daily", "tokens_monthly", "jobs_daily"})
+
+PLAN_SOURCES = frozenset({"admin", "stripe"})
+ALLOWED_PLAN_STATUSES = frozenset({"active", "inactive"})
+
+
+def plan_is_admin_locked(row: BillingCustomer) -> bool:
+    """True when an operator waiver blocks Stripe webhook plan updates."""
+    return (row.plan_source or "stripe").strip().lower() == "admin"
 
 
 def plan_status_from_stripe(subscription_status: str | None) -> str:
@@ -133,26 +143,30 @@ def plan_is_active(db: Session, tenant_id: UUID | str) -> bool:
     return bool(row and (row.plan_status or "").lower() == "active")
 
 
-def get_billing_by_stripe_customer(
-    db: Session, stripe_customer_id: str
+def get_billing_by_external_customer(
+    db: Session, external_customer_id: str
 ) -> BillingCustomer | None:
-    if not stripe_customer_id:
+    if not external_customer_id:
         return None
     return db.scalar(
         select(BillingCustomer).where(
-            BillingCustomer.stripe_customer_id == stripe_customer_id
+            BillingCustomer.external_customer_id == external_customer_id
         )
     )
 
 
+# Backward-compatible alias (Sprint 34)
+get_billing_by_stripe_customer = get_billing_by_external_customer
+
+
 def get_billing_by_subscription(
-    db: Session, stripe_subscription_id: str
+    db: Session, external_subscription_id: str
 ) -> BillingCustomer | None:
-    if not stripe_subscription_id:
+    if not external_subscription_id:
         return None
     return db.scalar(
         select(BillingCustomer).where(
-            BillingCustomer.stripe_subscription_id == stripe_subscription_id
+            BillingCustomer.external_subscription_id == external_subscription_id
         )
     )
 
@@ -162,17 +176,29 @@ def apply_plan_state(
     row: BillingCustomer,
     *,
     plan_status: str,
+    external_subscription_id: Optional[str] = None,
     stripe_subscription_id: Optional[str] = None,
     clear_subscription: bool = False,
     extra_meta: Optional[dict[str, Any]] = None,
+    plan_source: Optional[str] = None,
+    override_reason: Optional[str] | object = _UNSET,
 ) -> BillingCustomer:
-    """Persist plan_status, subscription id, and entitlement flags."""
+    """Persist plan_status, subscription id, entitlement flags, and plan source."""
+    # stripe_subscription_id kept as deprecated alias for Sprint 34 callers
+    sub_id = external_subscription_id if external_subscription_id is not None else stripe_subscription_id
     row.plan_status = plan_status
     row.entitlements = entitlements_for_plan_status(plan_status)
     if clear_subscription:
-        row.stripe_subscription_id = None
-    elif stripe_subscription_id:
-        row.stripe_subscription_id = stripe_subscription_id
+        row.external_subscription_id = None
+    elif sub_id:
+        row.external_subscription_id = sub_id
+    if plan_source is not None:
+        source_n = (plan_source or "stripe").strip().lower()
+        if source_n not in PLAN_SOURCES:
+            raise ValueError(f"plan_source must be one of {sorted(PLAN_SOURCES)}")
+        row.plan_source = source_n
+    if override_reason is not _UNSET:
+        row.override_reason = override_reason  # type: ignore[assignment]
     if extra_meta:
         meta = dict(row.meta or {})
         meta.update(extra_meta)
@@ -180,10 +206,11 @@ def apply_plan_state(
     db.add(row)
     db.flush()
     logger.info(
-        "plan_state_applied tenant_id=%s plan_status=%s subscription_id=%s entitlements=%s",
+        "plan_state_applied tenant_id=%s plan_status=%s plan_source=%s subscription_id=%s entitlements=%s",
         row.tenant_id,
         row.plan_status,
-        row.stripe_subscription_id,
+        row.plan_source,
+        row.external_subscription_id,
         row.entitlements,
     )
     return row

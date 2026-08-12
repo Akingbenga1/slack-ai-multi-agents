@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from api.app.admin.actions import (
     list_audit_logs,
     override_tenant_budgets,
+    override_tenant_plan,
     set_tenant_status,
 )
 from api.app.admin.health_overview import platform_health_overview
@@ -51,6 +52,11 @@ class BudgetOverrideBody(BaseModel):
     tokens_daily: Optional[int] = None
     tokens_monthly: Optional[int] = None
     jobs_daily: Optional[int] = None
+
+
+class TenantPlanBody(BaseModel):
+    plan_status: str = Field(description="active | inactive")
+    reason: str = Field(min_length=1, max_length=512, description="Operator reason for audit trail")
 
 
 def _audit_row(row: Any) -> dict[str, Any]:
@@ -193,6 +199,43 @@ def admin_override_budgets(
     return {
         "tenant_id": str(row.tenant_id),
         "plan_status": row.plan_status,
+        "plan_source": row.plan_source,
+        "override_reason": row.override_reason,
+        "entitlements": row.entitlements or {},
+    }
+
+
+@router.patch("/tenants/{tenant_id}/plan")
+def admin_override_tenant_plan(
+    tenant_id: UUID,
+    body: TenantPlanBody,
+    principal: Annotated[AuthPrincipal, Depends(require_platform_owner)],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """PO-01 / PO-25 — activate/deactivate plan without Stripe (post-create waiver)."""
+    set_client_id(str(tenant_id))
+    try:
+        row = override_tenant_plan(
+            db,
+            tenant_id,
+            plan_status=body.plan_status,
+            reason=body.reason,
+            actor_user_id=principal.sub,
+            actor_email=principal.email,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "tenant_id": str(row.tenant_id),
+        "plan_status": row.plan_status,
+        "plan_source": row.plan_source,
+        "override_reason": row.override_reason,
         "entitlements": row.entitlements or {},
     }
 

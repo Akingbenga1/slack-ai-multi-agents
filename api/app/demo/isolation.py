@@ -98,13 +98,16 @@ def prove_no_knowledge_leak(
                     out.append(list(vec_a))
             return out
 
+    from api.app.vector_store import QdrantVectorStore
+
+    store = QdrantVectorStore(settings, client=qclient)
     result_a = search_knowledge(
         client_id=tenant_a,
         query=secret_b,
         limit=10,
         settings=settings,
-        tei=_StubTei(),  # type: ignore[arg-type]
-        client=qclient,
+        embeddings=_StubTei(),  # type: ignore[arg-type]
+        store=store,
     )
     ids_a = {h.point_id for h in result_a.hits}
     if id_b in ids_a:
@@ -127,8 +130,8 @@ def prove_no_knowledge_leak(
         query=secret_b,
         limit=10,
         settings=settings,
-        tei=_StubTei(),  # type: ignore[arg-type]
-        client=qclient,
+        embeddings=_StubTei(),  # type: ignore[arg-type]
+        store=store,
     )
     ids_b = {h.point_id for h in result_b.hits}
     if id_b not in ids_b:

@@ -1,7 +1,9 @@
-"""Mention/DM → LangGraph grounded reply (Sprint 14) + file actions (Sprint 23).
+"""Mention/DM → grounded agent reply (Sprint 14) + file actions (Sprint 23).
 
 Sprint 26: orchestration delegates to ``reply_pipeline`` (Gate → Intake →
 RunAgent → Deliver). Entitlement helpers remain here for routes/tests.
+Agent invoke goes through ``run_agent`` / ``AgentRuntime`` (Sprint 39) — no
+LangGraph types in this module.
 """
 
 from __future__ import annotations

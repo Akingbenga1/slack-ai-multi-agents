@@ -4,6 +4,11 @@ MVP ships an **honest stub** only (Sprint 18). There is no guided checklist,
 form collector, or multi-step Slack conversation yet — by design
 (`PO-15`, `TM-16`, `deferred:onboarding`).
 
+**This is not tenant signup.** Org reps register at `/signup` (`POST /auth/signup`,
+Sprint 31). Slack “start onboarding” / MCP `start_onboarding` is an agent
+workflow that always returns *not configured*. It does not create a tenant,
+user, or session. See `docs/portal.md`.
+
 ## What exists today
 
 | Surface | Behaviour |

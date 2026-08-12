@@ -1,4 +1,4 @@
-"""Chunk → TEI → Qdrant ingest for extracted documents."""
+"""Chunk → embed → vector-store ingest for extracted documents."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
+from api.app.embedding import EmbeddingProvider
 from api.app.ingest.chunks_ingest import DEFAULT_EMBED_BATCH, ingest_chunks
 from api.app.ingest.document_chunk import DocumentChunk, chunk_document_units
 from api.app.ingest.documents.schema import DocumentUnit, ExtractedDocument
 from api.app.settings import Settings
-from api.app.tei.client import TeiClient
+from api.app.vector_store import VectorStore
 
 __all__ = [
     "DEFAULT_EMBED_BATCH",
@@ -62,7 +63,8 @@ def ingest_document_units(
     client_id: str,
     units: Sequence[DocumentUnit] | Iterable[DocumentUnit],
     settings: Settings | None = None,
-    tei: TeiClient | None = None,
+    embeddings: EmbeddingProvider | None = None,
+    store: VectorStore | None = None,
     embed_batch_size: int = DEFAULT_EMBED_BATCH,
     max_chars: int = 1500,
     overlap: int = 100,
@@ -78,7 +80,8 @@ def ingest_document_units(
         point_id_fn=point_id_for_document_chunk,
         payload_fn=document_chunk_payload,
         settings=settings,
-        tei=tei,
+        embeddings=embeddings,
+        store=store,
         embed_batch_size=embed_batch_size,
     )
     return DocumentIngestResult(
@@ -94,11 +97,13 @@ def ingest_extracted_document(
     client_id: str,
     document: ExtractedDocument,
     settings: Settings | None = None,
-    tei: TeiClient | None = None,
+    embeddings: EmbeddingProvider | None = None,
+    store: VectorStore | None = None,
 ) -> DocumentIngestResult:
     return ingest_document_units(
         client_id=client_id,
         units=document.units,
         settings=settings,
-        tei=tei,
+        embeddings=embeddings,
+        store=store,
     )

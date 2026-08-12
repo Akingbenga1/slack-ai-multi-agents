@@ -16,7 +16,7 @@ Prefer this id for smoke CLIs (`agent_dry_run`, history ingest, etc.) so knowled
 
 | Variable | Purpose |
 | -------- | ------- |
-| `DEMO_ACTIVATE_PLAN` | When `true`, seed sets `plan_status=active` + entitlements (no Checkout) |
+| `DEMO_ACTIVATE_PLAN` | When `true`, **demo seed** sets `plan_status=active` + entitlements (no Checkout). Public `/signup` ignores this flag (plan stays inactive). |
 | `DEMO_SLACK_TEAM_ID` | Optional fixture workspace id |
 | `DEMO_SLACK_BOT_TOKEN` | Optional bot token (encrypted into `slack_installs`) |
 | `DEMO_REPORT_CHANNEL_ID` | Optional channel; enables weekly recurring report schedule |
@@ -57,5 +57,7 @@ uv run pytest tests/demo/test_second_org.py -q
 ```
 
 Smoke stands up `second-org` / `admin-second@example.com` (password `second123`) if missing, lists both tenants, and proves Qdrant search does not leak knowledge across `client_id`s (in-memory fallback when Compose Qdrant is down).
+
+Public org registration (`/signup`) does not require this seed or `DEMO_ACTIVATE_PLAN`. Owner create via `/admin/tenants` remains available after self-signup orgs exist.
 
 Full spoken demo path (pay → Slack Q&A → …): **`docs/demo-script.md`**. Operator runbooks: **`docs/operator.md`**.

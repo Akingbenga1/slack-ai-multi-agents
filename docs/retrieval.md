@@ -1,6 +1,6 @@
-# Knowledge retrieval (Sprint 10)
+# Knowledge retrieval (Sprint 10 / 35)
 
-`search_knowledge` embeds a query via TEI and retrieves top-k chunks from Qdrant with a **mandatory** `client_id` filter (fail-closed). Hits include citation metadata for grounded agent replies and the bundled MCP tool of the same name (`docs/mcp.md`).
+`search_knowledge` embeds a query via ``EmbeddingProvider`` and retrieves top-k chunks from ``VectorStore`` with a **mandatory** `client_id` filter (fail-closed). Demo default adapters are TEI + Qdrant (`EMBEDDING_PROVIDER=tei`, `VECTOR_STORE=qdrant`). Hits include citation metadata for grounded agent replies and the bundled MCP tool of the same name (`docs/mcp.md`).
 
 ## API
 
@@ -28,24 +28,26 @@ for hit in result.hits:
 | `channel` | Slack channel id |
 | `filename` | Document filename |
 
-Missing / empty `client_id` raises `TenantFilterRequired` (same as Sprint 6 helpers).
+Missing / empty `client_id` raises `TenantFilterRequired` (fail-closed on every adapter).
 
 ## Modules
 
-- `api/app/retrieval/search.py` — `search_knowledge`
+- `api/app/retrieval/search.py` — `search_knowledge` (calls `EmbeddingProvider` + `VectorStore`)
 - `api/app/retrieval/types.py` — `KnowledgeCitation`, `KnowledgeSearchFilters`, `KnowledgeSearchResult`
-- `api/app/retrieval/citations.py` — payload → citation mapping
-- `api/app/qdrant/vectors.py` — `search_vectors(..., extra_conditions=)`
+- `api/app/retrieval/citations.py` — `VectorHit` payload → citation mapping
+- `api/app/vector_store/` — Strategy + Factory (`VECTOR_STORE`); Qdrant is the first adapter
+- `api/app/embedding/` — Strategy + Factory (`EMBEDDING_PROVIDER`); TEI is the first adapter
+- Adapter helpers: `api/app/qdrant/`, `api/app/tei/` — see `docs/qdrant-tei.md`
 
 ## Isolation tests (CI-friendly)
 
-In-memory Qdrant + stub TEI (no Compose required):
+In-memory Qdrant adapter + stub embeddings (no Compose required):
 
 ```bash
 uv run pytest tests/retrieval -q
 ```
 
-Asserts tenant A query never returns tenant B points; missing `client_id` fail-closed.
+Asserts tenant A query never returns tenant B points; missing `client_id` fail-closed; ingest/retrieve modules do not name Qdrant/TEI.
 
 ## Corpus smoke (Compose Qdrant + TEI)
 

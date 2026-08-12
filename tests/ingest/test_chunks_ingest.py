@@ -1,11 +1,9 @@
-"""Unit tests for shared ingest_chunks core (Task 29.1)."""
+"""Unit tests for shared ingest_chunks core (Task 29.1 / 35.3)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from unittest.mock import MagicMock
-
-import pytest
 
 from api.app.ingest.chunks_ingest import DEFAULT_EMBED_BATCH, ingest_chunks
 from api.app.ingest.document_pipeline import (
@@ -33,39 +31,37 @@ def test_default_embed_batch_constant():
     assert DEFAULT_EMBED_BATCH == 32
 
 
-def test_ingest_chunks_empty_skips_tei(monkeypatch: pytest.MonkeyPatch):
-    tei = MagicMock()
-    upsert = MagicMock()
-    monkeypatch.setattr(
-        "api.app.ingest.chunks_ingest.upsert_vectors",
-        upsert,
-    )
+def test_ingest_chunks_empty_skips_embed():
+    embeddings = MagicMock()
+    store = MagicMock()
     ids = ingest_chunks(
         client_id="t1",
         chunks=[],
         point_id_fn=lambda _c, ch: ch.text,
         payload_fn=lambda ch: {"text": ch.text},
-        tei=tei,
+        embeddings=embeddings,
+        store=store,
         settings=Settings(),
     )
     assert ids == []
-    tei.embed.assert_not_called()
-    upsert.assert_not_called()
+    embeddings.embed.assert_not_called()
+    store.upsert.assert_not_called()
 
 
-def test_ingest_chunks_batches_and_strategies(monkeypatch: pytest.MonkeyPatch):
+def test_ingest_chunks_batches_and_strategies():
     settings = Settings()
-    tei = MagicMock()
-    tei.embed.side_effect = lambda texts: [[float(i)] * 3 for i, _ in enumerate(texts)]
+    embeddings = MagicMock()
+    embeddings.embed.side_effect = lambda texts: [
+        [float(i)] * 3 for i, _ in enumerate(texts)
+    ]
+    store = MagicMock()
     upsert_calls: list[dict] = []
 
     def fake_upsert(**kwargs):
         upsert_calls.append(kwargs)
+        return list(kwargs.get("ids") or [])
 
-    monkeypatch.setattr(
-        "api.app.ingest.chunks_ingest.upsert_vectors",
-        fake_upsert,
-    )
+    store.upsert.side_effect = fake_upsert
 
     chunks = [_FakeChunk(text=f"c{i}") for i in range(5)]
     ids = ingest_chunks(
@@ -73,13 +69,14 @@ def test_ingest_chunks_batches_and_strategies(monkeypatch: pytest.MonkeyPatch):
         chunks=chunks,
         point_id_fn=lambda client_id, ch: f"{client_id}:{ch.text}",
         payload_fn=lambda ch: {"kind": "fake", "text": ch.text},
-        tei=tei,
+        embeddings=embeddings,
+        store=store,
         settings=settings,
         embed_batch_size=2,
     )
 
     assert ids == [f"tenant-x:c{i}" for i in range(5)]
-    assert tei.embed.call_count == 3  # 2 + 2 + 1
+    assert embeddings.embed.call_count == 3  # 2 + 2 + 1
     assert len(upsert_calls) == 3
     assert upsert_calls[0]["ids"] == ["tenant-x:c0", "tenant-x:c1"]
     assert upsert_calls[0]["payloads"][0]["kind"] == "fake"

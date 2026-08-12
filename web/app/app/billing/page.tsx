@@ -26,7 +26,7 @@ export default async function BillingPage({ searchParams }: Props) {
   let banner: string | null = null;
   if (checkout === "success") {
     banner =
-      "Checkout completed — plan activates when Stripe delivers checkout.session.completed (may take a few seconds).";
+      "Payment completed — plan activates when the payment provider confirms (may take a few seconds).";
   } else if (checkout === "cancel") {
     banner = "Checkout canceled — no charge.";
   }
@@ -38,8 +38,8 @@ export default async function BillingPage({ searchParams }: Props) {
     <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
       <h1 style={{ marginTop: 0 }}>Billing</h1>
       <p>
-        Pay for the organisation plan via Stripe Checkout, or open the Customer
-        Portal to update payment method / cancel (OR-02).
+        Pay for the organisation plan, or manage your subscription (payment
+        method / cancel) (OR-02).
       </p>
       <p>
         Signed in as {session?.user?.email} ({session?.user?.role}

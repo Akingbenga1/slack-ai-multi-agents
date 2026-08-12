@@ -6,14 +6,15 @@ import { apiClient } from "@/lib/api";
 type Props = {
   accessToken: string | null;
   tenantId: string | null;
-  /** From `/app/billing?checkout=success|cancel` after Stripe redirect. */
+  /** From `/app/billing?checkout=success|cancel` after checkout redirect. */
   checkoutOutcome?: "success" | "cancel" | null;
 };
 
 type BillingCustomer = {
   tenant_id: string;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
+  provider?: string | null;
+  external_customer_id: string | null;
+  external_subscription_id: string | null;
   plan_status: string;
   entitlements: Record<string, boolean>;
 };
@@ -29,7 +30,7 @@ async function postSession(
   });
   const url = payload?.url;
   if (!url) {
-    throw new Error("API returned no Checkout/Portal URL");
+    throw new Error("API returned no checkout/portal URL");
   }
   return url;
 }
@@ -90,7 +91,7 @@ export function BillingActions({
     };
   }, [reload, checkoutOutcome]);
 
-  // After Checkout success, poll until webhook activates the plan (or timeout).
+  // After checkout success, poll until webhook activates the plan (or timeout).
   useEffect(() => {
     if (checkoutOutcome !== "success" || !accessToken) return;
     if (billing?.plan_status === "active") {
@@ -148,6 +149,8 @@ export function BillingActions({
         .map(([k, v]) => `${k}:${v ? "on" : "off"}`)
         .join(" · ")
     : null;
+  const stripeAdapter =
+    (billing?.provider || "").toLowerCase() === "stripe";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
@@ -163,8 +166,8 @@ export function BillingActions({
           <p style={{ margin: 0 }}>Loading plan…</p>
         ) : billing === null ? (
           <p style={{ margin: 0 }}>
-            No billing customer yet — use <strong>Subscribe</strong> to create one
-            and open Stripe Checkout (OR-02).
+            No billing customer yet — use <strong>Pay</strong> to create one and
+            start checkout (OR-02).
           </p>
         ) : (
           <>
@@ -173,20 +176,20 @@ export function BillingActions({
               <strong style={{ color: planActive ? "#1b5e20" : "#9a3412" }}>
                 {billing.plan_status}
               </strong>
-              {billing.stripe_subscription_id
-                ? ` · sub ${billing.stripe_subscription_id}`
+              {billing.external_subscription_id
+                ? ` · sub ${billing.external_subscription_id}`
                 : ""}
             </p>
             {waitingForWebhook ? (
               <p style={{ margin: "0 0 0.35rem", color: "#555" }}>
-                Waiting for Stripe webhook to activate the plan…
+                Waiting for payment confirmation to activate the plan…
               </p>
             ) : null}
             {!planActive && !waitingForWebhook ? (
               <p style={{ margin: "0 0 0.35rem", color: "#555" }}>
                 Agent features stay off until the organisation plan is active.
-                Subscribe below, or open the Customer Portal if you already have a
-                Stripe customer.
+                Pay below, or manage your subscription if you already have a
+                billing customer.
               </p>
             ) : null}
             {entSummary ? (
@@ -203,10 +206,10 @@ export function BillingActions({
           style={{ padding: "0.5rem 1rem", cursor: "pointer" }}
         >
           {pending === "checkout"
-            ? "Starting Checkout…"
+            ? "Starting checkout…"
             : planActive
-              ? "Resubscribe / change plan (Checkout)"
-              : "Subscribe (Checkout)"}
+              ? "Resubscribe / change plan"
+              : "Pay"}
         </button>
         <button
           type="button"
@@ -215,8 +218,8 @@ export function BillingActions({
           style={{ padding: "0.5rem 1rem", cursor: "pointer" }}
         >
           {pending === "portal"
-            ? "Opening Portal…"
-            : "Manage payment method (Portal)"}
+            ? "Opening…"
+            : "Manage subscription"}
         </button>
       </div>
       {error ? (
@@ -225,9 +228,15 @@ export function BillingActions({
         </p>
       ) : null}
       <p style={{ color: "#555", margin: 0, fontSize: "0.9rem" }}>
-        Requires Stripe test keys in the API <code>.env</code> (
-        <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_ID</code>,{" "}
-        <code>STRIPE_WEBHOOK_SECRET</code>). See <code>docs/billing.md</code>.
+        Requires payment provider keys in the API <code>.env</code>. See{" "}
+        <code>docs/billing.md</code>.
+        {stripeAdapter ? (
+          <>
+            {" "}
+            Stripe adapter: <code>STRIPE_SECRET_KEY</code>,{" "}
+            <code>STRIPE_PRICE_ID</code>, <code>STRIPE_WEBHOOK_SECRET</code>.
+          </>
+        ) : null}
       </p>
     </div>
   );

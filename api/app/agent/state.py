@@ -6,7 +6,8 @@ from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
 from langgraph.graph.message import add_messages
 
-ModelTier = Literal["haiku", "sonnet"]
+# Vendor-neutral tiers — adapters map to concrete model ids (Sprint 33)
+ModelTier = Literal["fast", "capable"]
 WorkflowName = Literal[
     "qa",
     "summarize",

@@ -1,6 +1,10 @@
-# Celery queues (Sprint 5)
+# Celery queues (Sprint 5; Sprint 38 JobQueue)
 
-Background jobs use **Celery + Redis** on the laptop-VPS. App processes run on the host; Redis is the Compose service at `REDIS_URL` (default `redis://localhost:6379/0`).
+Background jobs use **Celery + Redis** on the laptop-VPS via the ``JobQueue``
+Strategy (`JOB_QUEUE=celery` demo default). Product code enqueues by ``kind``
+through ``get_job_queue().enqueue(...)`` — it does not call ``apply_async`` by
+name. App processes run on the host; Redis is the Compose service at
+`REDIS_URL` (default `redis://localhost:6379/0`). Do not rename `REDIS_URL`.
 
 ## Run Worker + Beat
 
@@ -53,13 +57,13 @@ Tenant Celery tasks (`heartbeat`, `ingest_upload`, `slack_history_sync`, `recurr
 - `run_dispatch` — thin Beat loops (due list → enqueue)
 - `build_beat_schedule(settings)` in `worker/celery_app.py` — intervals from Settings (factory; import still uses `get_settings()` once)
 
-Domain bodies only call `ingest_upload` / `sync_slack_history` / `post_recurring_report`. Shared TEI batch + Qdrant upsert for knowledge ingest lives in `api.app.ingest.chunks_ingest.ingest_chunks` (Slack message vs document supply `point_id_fn` / `payload_fn`).
+Domain bodies only call `ingest_upload` / `sync_slack_history` / `post_recurring_report`. Shared embed + upsert for knowledge ingest lives in `api.app.ingest.chunks_ingest.ingest_chunks` (Slack message vs document supply `point_id_fn` / `payload_fn`; adapters via `EMBEDDING_PROVIDER` / `VECTOR_STORE`).
 
 ## Upload ingest (Sprint 8)
 
 Task name: `worker.ingest_upload` (`kind=ingest_upload` in `jobs`).
 
-Triggered by `POST /uploads` (default `enqueue=true`). Parses `file_role=document|slack_history`, then chunk → TEI → Qdrant. See `docs/uploads.md` and `docs/document-ingest.md`.
+Triggered by `POST /uploads` (default `enqueue=true`). Parses `file_role=document|slack_history`, then chunk → embed → upsert. See `docs/uploads.md` and `docs/document-ingest.md`.
 
 ## Live Slack history sync (Sprint 9)
 

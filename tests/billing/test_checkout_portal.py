@@ -93,7 +93,7 @@ def test_portal_session_url(db: Session, monkeypatch: pytest.MonkeyPatch):
     db.add(
         BillingCustomer(
             tenant_id=tenant.id,
-            stripe_customer_id="cus_existing",
+            external_customer_id="cus_existing",
             plan_status="inactive",
         )
     )

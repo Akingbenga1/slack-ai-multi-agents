@@ -1,7 +1,8 @@
 """Agent runtime dependency bag (Sprint 25.1 — Factory for Strategy injection).
 
-Bundles settings + injectables so ``build_agent_graph`` / ``run_agent`` /
+Bundles settings + injectables so ``AgentRuntime`` / ``run_agent`` /
 Slack reply take one deps object instead of repeating keyword knobs.
+LangGraph checkpointer types stay here; ``AGENT_CHECKPOINTER`` is not a vendor Strategy.
 """
 
 from __future__ import annotations

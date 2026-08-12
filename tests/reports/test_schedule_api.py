@@ -118,12 +118,17 @@ def test_schedule_rejects_bad_cadence(client: TestClient):
 def test_force_enqueue(
     client: TestClient, schedules: MemorySchedules, monkeypatch: pytest.MonkeyPatch
 ):
-    class _FakeAsync:
-        id = "report-task-1"
+    from api.app.job_queue import EnqueueResult
+
+    class _FakeQueue:
+        name = "celery"
+
+        def enqueue(self, *, kind: str, tenant_id: str, payload=None):
+            return EnqueueResult(task_id="report-task-1", queue="default", kind=kind)
 
     monkeypatch.setattr(
-        "api.app.jobs.routes.enqueue_recurring_report",
-        lambda **_kwargs: _FakeAsync(),
+        "api.app.jobs.routes.get_job_queue",
+        lambda: _FakeQueue(),
     )
     monkeypatch.setattr(
         "api.app.jobs.routes.require_budget",

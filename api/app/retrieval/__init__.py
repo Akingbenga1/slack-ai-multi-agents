@@ -1,4 +1,4 @@
-"""Tenant-scoped knowledge retrieval (TEI embed → Qdrant → citations)."""
+"""Tenant-scoped knowledge retrieval (embed → vector store → citations)."""
 
 from api.app.retrieval.search import (
     KnowledgeCitation,

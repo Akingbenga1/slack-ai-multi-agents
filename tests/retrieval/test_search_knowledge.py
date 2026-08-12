@@ -1,4 +1,4 @@
-"""Unit tests for search_knowledge (Task 10.1)."""
+"""Unit tests for search_knowledge (Task 10.1 / 35.3)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from tests.retrieval.helpers import (
     StubTei,
     memory_client,
     memory_settings,
+    memory_store,
     unit_vector,
 )
 
@@ -18,6 +19,7 @@ from tests.retrieval.helpers import (
 def test_search_knowledge_returns_citations_with_metadata():
     settings = memory_settings()
     client = memory_client()
+    store = memory_store(settings, client)
     vec = unit_vector(0)
     upsert_vectors(
         client_id=TENANT_A,
@@ -45,8 +47,8 @@ def test_search_knowledge_returns_citations_with_metadata():
         query="onboarding checklist",
         limit=5,
         settings=settings,
-        tei=tei,  # type: ignore[arg-type]
-        client=client,
+        embeddings=tei,
+        store=store,
     )
 
     assert result.client_id == TENANT_A
@@ -64,6 +66,7 @@ def test_search_knowledge_returns_citations_with_metadata():
 def test_search_knowledge_optional_kind_filter():
     settings = memory_settings()
     client = memory_client()
+    store = memory_store(settings, client)
     vec_slack = unit_vector(0)
     vec_doc = unit_vector(1)
     upsert_vectors(
@@ -99,8 +102,8 @@ def test_search_knowledge_optional_kind_filter():
         filters=KnowledgeSearchFilters(kind="document"),
         limit=5,
         settings=settings,
-        tei=tei,  # type: ignore[arg-type]
-        client=client,
+        embeddings=tei,
+        store=store,
     )
     assert len(filtered.hits) == 1
     assert filtered.hits[0].kind == "document"
@@ -112,8 +115,8 @@ def test_search_knowledge_optional_kind_filter():
         filters={"kind": "slack_message"},
         limit=5,
         settings=settings,
-        tei=tei,  # type: ignore[arg-type]
-        client=client,
+        embeddings=tei,
+        store=store,
     )
     assert len(slack_only.hits) == 1
     assert slack_only.hits[0].kind == "slack_message"
@@ -126,8 +129,8 @@ def test_search_knowledge_empty_query_rejected():
             client_id=TENANT_A,
             query="  ",
             settings=memory_settings(),
-            tei=StubTei({}),  # type: ignore[arg-type]
-            client=memory_client(),
+            embeddings=StubTei({}),
+            store=memory_store(),
         )
 
 
@@ -137,6 +140,6 @@ def test_search_knowledge_missing_client_id_fail_closed():
             client_id=None,
             query="hello",
             settings=memory_settings(),
-            tei=StubTei({"hello": unit_vector(0)}),  # type: ignore[arg-type]
-            client=memory_client(),
+            embeddings=StubTei({"hello": unit_vector(0)}),
+            store=memory_store(),
         )

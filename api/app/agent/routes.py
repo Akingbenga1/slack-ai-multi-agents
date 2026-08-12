@@ -219,7 +219,7 @@ def agent_dry_run(
     """
     Run LangGraph offline for the caller's tenant (no Slack reply).
 
-    Uses stub LLM when `ANTHROPIC_API_KEY` is unset.
+    Chat backend follows ``LLM_PROVIDER`` (use ``stub`` for offline laptop runs).
     """
     _ = db  # session ensures DB is up; usage recorded inside run_agent
     client_id = resolve_tenant_uuid_for_principal(principal)
@@ -250,7 +250,7 @@ def agent_dry_run(
         question=result["question"],
         answer=result["answer"],
         workflow=str(result.get("workflow") or "qa"),
-        model_tier=str(result.get("model_tier") or "haiku"),
+        model_tier=str(result.get("model_tier") or "fast"),
         complexity_flags=list(result.get("complexity_flags") or []),
         usage_tokens=int(result.get("usage_tokens") or 0),
         hedge=bool(result.get("hedge")),

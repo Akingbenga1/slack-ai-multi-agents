@@ -23,7 +23,7 @@ Tenant also from JWT membership or `X-Client-Id` (cross-tenant denied for org us
 | `document` | `.pdf` `.docx` `.xlsx` `.csv` |
 | `slack_history` | `.zip` `.json` `.ndjson` `.csv` `.xlsx` |
 
-Files are stored under `{UPLOAD_DIR}/{client_id}/{upload_id}_{filename}` (default `data/uploads/`).
+Files are stored via ``BlobStore`` (`BLOB_STORE=local` demo default). The local adapter keeps blobs under `{UPLOAD_DIR}/{client_id}/{upload_id}_{filename}` (default `data/uploads/`). DB fields such as `relative_path` / `storage_relative_path` are **blob keys**, not absolute filesystem paths.
 
 ### Example
 
@@ -40,7 +40,8 @@ Optional form fields: `channel` (Slack history channel override), `enqueue` (def
 
 ## Settings
 
-- `UPLOAD_DIR` (default `data/uploads`) — see `.env.example`
+- `BLOB_STORE` (default `local`; `s3` stub/extension only) — see `.env.example`
+- `UPLOAD_DIR` (default `data/uploads`) — local-adapter root
 
 ## Ingest job
 

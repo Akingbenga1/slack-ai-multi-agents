@@ -73,7 +73,7 @@ def run_db_smoke() -> dict:
             db,
             row,
             plan_status="active",
-            stripe_subscription_id="sub_smoke_local",
+            external_subscription_id="sub_smoke_local",
             extra_meta={"source": "first_org_hardening_smoke"},
         )
         db.commit()

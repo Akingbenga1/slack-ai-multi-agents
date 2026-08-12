@@ -48,11 +48,11 @@ def test_run_agent_route_retrieve_compose():
     )
     assert out["client_id"] == TENANT
     assert out["workflow"] == "qa"
-    assert out["model_tier"] == "haiku"
+    assert out["model_tier"] == "fast"
     assert out["hedge"] is False
     assert len(out["retrieved_chunks"]) == 1
     assert out["retrieved_chunks"][0]["client_id"] == TENANT
-    assert "stub:haiku" in out["answer"]
+    assert "stub:fast" in out["answer"]
     assert out["thread_id"] == thread_id_for_tenant(TENANT, "t1")
 
 
@@ -90,7 +90,7 @@ def test_thread_id_scoped_per_tenant():
     assert ":" not in a.split(":", 1)[1]  # conversation id sanitized
 
 
-def test_sonnet_escalation_in_graph():
+def test_capable_escalation_in_graph():
     settings = Settings(agent_checkpointer="memory", anthropic_api_key="")
     out = run_agent(
         client_id=TENANT,
@@ -102,9 +102,9 @@ def test_sonnet_escalation_in_graph():
         chat_model=StubChatModel(),
         record_usage=False,
     )
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert "compare" in out["complexity_flags"]
-    assert "stub:sonnet" in out["answer"]
+    assert "stub:capable" in out["answer"]
 
 
 def test_memory_checkpointer_thread_continuity():
@@ -129,7 +129,7 @@ def test_memory_checkpointer_thread_continuity():
             "question": "What is the refund policy?",
             "retrieved_chunks": [],
             "workflow": "qa",
-            "model_tier": "haiku",
+            "model_tier": "fast",
         },
         config,
     )
@@ -140,7 +140,7 @@ def test_memory_checkpointer_thread_continuity():
             "question": "And the window?",
             "retrieved_chunks": [],
             "workflow": "qa",
-            "model_tier": "haiku",
+            "model_tier": "fast",
         },
         config,
     )

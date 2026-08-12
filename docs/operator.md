@@ -35,7 +35,7 @@ uv run python scripts/seed_demo.py
 | `owner@example.com` / `owner123` | platform_owner | `/admin` |
 | `admin@example.com` / `admin123` | org_admin | `/app` |
 
-Demo tenant id: `11111111-1111-1111-1111-111111111111`. Optional local plan without Stripe: `DEMO_ACTIVATE_PLAN=true` — see `docs/demo-readiness.md`.
+Demo tenant id: `11111111-1111-1111-1111-111111111111`. Optional local plan without Stripe: `DEMO_ACTIVATE_PLAN=true` — see `docs/demo-readiness.md`. New orgs can also register at `/signup` without this seed (`docs/portal.md`). Slack “start onboarding” is a process stub, not signup (`docs/onboarding.md`).
 
 ## 3. App processes (host)
 
@@ -61,9 +61,10 @@ Queues / schedules: `docs/celery.md`. Health: `GET http://localhost:8000/health`
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=dev-nextauth-secret-change-me
+IDENTITY_PROVIDER=credentials
 ```
 
-Auth shells: platform `/admin`, org `/app` (JWT mint via API when seeded).
+Auth shells: platform `/admin`, org `/app` (JWT mint via API `IdentityProvider` when seeded; demo default `IDENTITY_PROVIDER=credentials`).
 
 ## 4. Tunnel (public HTTPS)
 
@@ -118,7 +119,7 @@ Requires **active plan** entitlements (`sync` / `ingest` / `agent`) — unpaid p
 uv run python -m mcp_server
 ```
 
-Tools require `client_id`. Agent default: `AGENT_RETRIEVE_BACKEND=mcp`. Docs: `docs/mcp.md`. Optional Anthropic: `ANTHROPIC_API_KEY` (`docs/agent.md`).
+Tools require `client_id`. Agent default: `AGENT_RETRIEVE_BACKEND=mcp`. Docs: `docs/mcp.md`. Chat: `LLM_PROVIDER` + adapter secrets (`docs/agent.md`).
 
 ## 10. Portals quick map
 

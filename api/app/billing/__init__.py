@@ -1,10 +1,10 @@
-"""Stripe billing: customers, checkout, portal, webhooks, plans (Sprint 11)."""
+"""Billing: customers, checkout, portal, webhooks, plans (Sprint 11 / 34)."""
 
 from api.app.billing.customers import (
-    BillingError,
     ensure_billing_customer,
     get_billing_customer,
 )
+from api.app.billing.errors import BillingError
 from api.app.billing.plans import (
     ACTIVE_ENTITLEMENTS,
     INACTIVE_ENTITLEMENTS,

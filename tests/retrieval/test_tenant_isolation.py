@@ -1,4 +1,4 @@
-"""Fail-closed tenant isolation tests for retrieval (Task 10.2)."""
+"""Fail-closed tenant isolation tests for retrieval (Task 10.2 / 35.3)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from tests.retrieval.helpers import (
     StubTei,
     memory_client,
     memory_settings,
+    memory_store,
     unit_vector,
 )
 
@@ -19,6 +20,7 @@ from tests.retrieval.helpers import (
 def test_tenant_a_search_never_returns_tenant_b():
     settings = memory_settings()
     client = memory_client()
+    store = memory_store(settings, client)
     vec_a = unit_vector(0)
     vec_b = unit_vector(1)
     id_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -48,8 +50,8 @@ def test_tenant_a_search_never_returns_tenant_b():
         query="bravo secret from other tenant",
         limit=10,
         settings=settings,
-        tei=tei,  # type: ignore[arg-type]
-        client=client,
+        embeddings=tei,
+        store=store,
     )
     ids_a = {h.point_id for h in result_a.hits}
     assert id_b not in ids_a
@@ -60,8 +62,8 @@ def test_tenant_a_search_never_returns_tenant_b():
         query="bravo secret",
         limit=10,
         settings=settings,
-        tei=tei,  # type: ignore[arg-type]
-        client=client,
+        embeddings=tei,
+        store=store,
     )
     ids_b = {h.point_id for h in result_b.hits}
     assert id_b in ids_b
@@ -94,8 +96,8 @@ def test_search_knowledge_empty_client_id_raises():
             client_id="",
             query="anything",
             settings=memory_settings(),
-            tei=StubTei({"anything": unit_vector(0)}),  # type: ignore[arg-type]
-            client=memory_client(),
+            embeddings=StubTei({"anything": unit_vector(0)}),
+            store=memory_store(),
         )
 
 

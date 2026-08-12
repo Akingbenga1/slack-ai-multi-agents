@@ -1,3 +1,10 @@
+/**
+ * Identity-provider factory for NextAuth (Sprint 36).
+ *
+ * Demo default: credentials → POST /auth/token (API IdentityProvider).
+ * OIDC / SAML / Google / Microsoft are documented stubs only — no env keys yet.
+ */
+
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
@@ -16,7 +23,11 @@ function apiBaseUrl(): string | null {
   return raw.replace(/\/$/, "");
 }
 
-/** Mint FastAPI Bearer JWT (credentials validated server-side in Postgres). */
+function identityProviderName(): string {
+  return (process.env.IDENTITY_PROVIDER || "credentials").trim().toLowerCase();
+}
+
+/** Mint FastAPI Bearer JWT (credentials validated server-side via IdentityProvider). */
 async function fetchApiAccessToken(
   email: string,
   password: string,
@@ -51,44 +62,66 @@ async function fetchApiMe(accessToken: string): Promise<ApiMe | null> {
   }
 }
 
+function credentialsProvider() {
+  return CredentialsProvider({
+    name: "Credentials",
+    credentials: {
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" },
+    },
+    async authorize(credentials) {
+      if (!credentials?.email || !credentials.password) {
+        return null;
+      }
+      const accessToken = await fetchApiAccessToken(
+        credentials.email,
+        credentials.password,
+      );
+      if (!accessToken) {
+        return null;
+      }
+      const me = await fetchApiMe(accessToken);
+      if (!me?.sub || !me.email) {
+        return null;
+      }
+      return {
+        id: me.sub,
+        email: me.email,
+        name: me.email,
+        role: me.role,
+        tenantId: me.tenant_id,
+        accessToken,
+      };
+    },
+  });
+}
+
+/**
+ * Factory: select NextAuth providers by IDENTITY_PROVIDER (default credentials).
+ * Future OIDC/SAML adapters plug in here without rewriting JWT session callbacks.
+ */
+export function getAuthProviders(): NextAuthOptions["providers"] {
+  const name = identityProviderName();
+  if (name === "credentials") {
+    return [credentialsProvider()];
+  }
+  if (name === "oidc" || name === "saml" || name === "google" || name === "microsoft") {
+    throw new Error(
+      `IDENTITY_PROVIDER=${name} is not implemented — set IDENTITY_PROVIDER=credentials ` +
+        "(documented extension only; no OIDC/SAML env keys this sprint)",
+    );
+  }
+  throw new Error(
+    `Unknown IDENTITY_PROVIDER=${name}; expected credentials|oidc|saml|google|microsoft`,
+  );
+}
+
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
   },
-  providers: [
-    CredentialsProvider({
-      name: "Credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials.password) {
-          return null;
-        }
-        const accessToken = await fetchApiAccessToken(
-          credentials.email,
-          credentials.password,
-        );
-        if (!accessToken) {
-          return null;
-        }
-        const me = await fetchApiMe(accessToken);
-        if (!me?.sub || !me.email) {
-          return null;
-        }
-        return {
-          id: me.sub,
-          email: me.email,
-          name: me.email,
-          role: me.role,
-          tenantId: me.tenant_id,
-          accessToken,
-        };
-      },
-    }),
-  ],
+  providers: getAuthProviders(),
   callbacks: {
     async jwt({ token, user }) {
       if (user) {

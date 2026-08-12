@@ -58,13 +58,13 @@ def _active_tenant(db: Session) -> Tenant:
     db.flush()
     row = BillingCustomer(
         tenant_id=t.id,
-        stripe_customer_id=f"cus_{uuid4().hex[:8]}",
+        external_customer_id=f"cus_{uuid4().hex[:8]}",
         plan_status="inactive",
         entitlements={},
     )
     db.add(row)
     db.flush()
-    apply_plan_state(db, row, plan_status="active", stripe_subscription_id="sub_x")
+    apply_plan_state(db, row, plan_status="active", external_subscription_id="sub_x")
     db.commit()
     return t
 
@@ -158,13 +158,13 @@ def test_usage_summary_ok(client: TestClient, db: Session):
     db.flush()
     row = BillingCustomer(
         tenant_id=t.id,
-        stripe_customer_id="cus_demo",
+        external_customer_id="cus_demo",
         plan_status="inactive",
         entitlements={},
     )
     db.add(row)
     db.flush()
-    apply_plan_state(db, row, plan_status="active", stripe_subscription_id="sub_demo")
+    apply_plan_state(db, row, plan_status="active", external_subscription_id="sub_demo")
     _record(db, t.id, EVENT_SLACK_MENTION, units=1, when=datetime.now(timezone.utc))
     db.commit()
 

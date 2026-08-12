@@ -1,6 +1,8 @@
-# LangGraph agent (Sprint 13–14)
+# Agent runtime (Sprint 13–14 / 39)
 
-Agent graph: **route → tools → compose**. The tools node invokes bundled MCP `search_knowledge` over stdio (Sprint 15). Slack mention/DM path posts grounded replies (Sprint 14).
+Product invoke is **`run_agent` / `run_report`** via an **`AgentRuntime`** adapter. LangGraph (`StateGraph` + checkpointer) is the first implementation (`LangGraphAgentRuntime`). Graph shape: **route → tools → compose**. The tools node invokes bundled MCP `search_knowledge` over stdio (Sprint 15). Slack mention/DM path posts grounded replies (Sprint 14).
+
+No `AGENT_RUNTIME` env this sprint (single runtime). `AGENT_CHECKPOINTER=memory|postgres` stays the small LangGraph saver factory — not a separate vendor Strategy.
 
 ## State
 
@@ -10,7 +12,7 @@ Agent graph: **route → tools → compose**. The tools node invokes bundled MCP
 | `messages` | Chat history (`add_messages`) |
 | `retrieved_chunks` | Serialized `search_knowledge` hits (tenant-filtered) |
 | `workflow` | `qa` \| `summarize` \| `status` \| `meeting_brief` \| `meeting_agenda` \| `meeting_notes` \| `report` \| `onboarding` \| `file_analyse` \| `file_pdf_export` \| `file_rename` \| `workflow_store` \| `workflow_list` \| `workflow_copy` \| `workflow_edit` \| `unknown` |
-| `model_tier` | `haiku` (default) \| `sonnet` |
+| `model_tier` | `fast` (default) \| `capable` |
 | `complexity_flags` | Escalation reasons |
 | `answer` / `hedge` / `usage_tokens` | Compose outputs |
 | `org_system_prompt` | Optional overlay from `agent_configs.system_prompt` (Sprint 19) |
@@ -20,7 +22,7 @@ Agent graph: **route → tools → compose**. The tools node invokes bundled MCP
 
 1. **route** — classify workflow (`qa` / `status` / `summarize` / meeting `brief`·`agenda`·`notes` / `report` / `onboarding`); set Haiku/Sonnet via complexity heuristics  
 2. **tools** — MCP client → `search_knowledge` (tenant `client_id` required; fail-closed). Meeting drafts / `draft_report` / `start_onboarding` for typed workflows. Set `AGENT_RETRIEVE_BACKEND=direct` only for in-process debugging.  
-3. **compose** — Anthropic (or stub) grounded on evidence with **workflow-specific prompts**; records `llm_tokens` usage. Onboarding returns the stub message without an LLM call. Org `system_prompt` (if set) is prepended to the workflow system prompt.
+3. **compose** — selected `ChatModel` (or stub) grounded on evidence with **workflow-specific prompts**; records `llm_tokens` usage. Onboarding returns the stub message without an LLM call. Org `system_prompt` (if set) is prepended to the workflow system prompt.
 
 ## Workflow registry & Strategies (Sprint 25–26 / 30)
 
@@ -43,7 +45,7 @@ Pattern intent and phased rollout: [`Project-Documents/review.md`](../Project-Do
 4. Register a `ToolStrategy` in `tool_strategies.py` (or reuse RAG / meeting / report strategies) and a compose prompt in `prompts.py`.
 5. If Slack side effects differ (PDF upload, rename, library confirm), register a DeliveryStrategy under `api/app/slack/delivery/` and point `delivery_hint` at it.
 
-New capability = new registration. Keep the LangGraph shell (`route → tools → compose`) and Slack pipeline stages stable.
+New capability = new registration. Keep the runtime shell (`route → tools → compose`) and Slack pipeline stages stable. Swapping the agent framework later touches `AgentRuntime` / `langgraph_adapter`, not Slack/billing/workflow modules.
 
 ### Slack delivery Strategies
 
@@ -164,7 +166,7 @@ Honest deferred process — no invented checklist:
 | Compose | Deterministic stub text (no LLM, not the RAG hedge) |
 | Knowledge Q&A | “onboarding checklist for new hires” stays `qa` → `search_knowledge` |
 
-Triggers: “start onboarding”, “begin client onboarding”, “onboarding process/workflow”, `start_onboarding`. Extension point for a future state machine: `docs/onboarding.md`.
+Triggers: “start onboarding”, “begin client onboarding”, “onboarding process/workflow”, `start_onboarding`. Extension point for a future state machine: `docs/onboarding.md`. This stub is **not** org registration (`/signup` / Sprint 31).
 
 ## Slack live path (Sprint 14)
 
@@ -195,11 +197,24 @@ Live verify still needs Slack app + tunnel + **active** plan for the tenant (Str
 - **Tenant filter:** every node requires `client_id`; tools/compose re-filter chunks so foreign-tenant hits never reach the answer.
 - Helpers: `api/app/agent/guardrails.py` (`HEDGE_MESSAGE`, `require_tenant_client_id`, `filter_chunks_for_tenant`).
 
-## Model policy (13.3)
+## Model policy (13.3 / 33)
 
-- Default **Haiku** (`ANTHROPIC_MODEL_HAIKU`)
-- Escalate to **Sonnet** when complexity flags fire (`compare`, `analyze`, long questions, summarize/status/meeting/report workflows)
-- Token usage → `usage_events` (`event_type=llm_tokens`) toward plan budgets
+- Graph tiers: **`fast`** (default) and **`capable`** (escalation)
+- Complexity flags (`compare`, `analyze`, long questions, summarize/status/meeting/report/…) escalate to **capable**
+- Each LLM adapter maps tiers to vendor model ids (Anthropic: Haiku / Sonnet; Ollama: `OLLAMA_MODEL_FAST` / `OLLAMA_MODEL_CAPABLE`)
+- Token usage → `usage_events` (`event_type=llm_tokens`) with the **resolved** model id from the adapter
+
+## LLM provider (Sprint 33)
+
+| `LLM_PROVIDER` | Backend |
+| -------------- | ------- |
+| `anthropic` (demo default) | Anthropic Messages API (`ANTHROPIC_API_KEY`, Haiku/Sonnet model envs) |
+| `ollama` | OpenAI-compatible `POST {OLLAMA_URL}/v1/chat/completions` |
+| `stub` | Deterministic offline reply for tests / laptop dry-runs |
+
+Offline is **`LLM_PROVIDER=stub`**. An empty `ANTHROPIC_API_KEY` no longer selects the stub by itself.
+
+Compose, the graph, and model-tier policy know only `ChatModel` + `fast` / `capable`. Vendor SDKs and model ids live in adapters (`api/app/agent/llm.py`); the Anthropic SDK is imported lazily inside that adapter.
 
 ## Checkpointer (13.2)
 
@@ -225,7 +240,7 @@ uv run python scripts/agent_dry_run.py \
   --question "onboarding checklist for new hires"
 ```
 
-Without `ANTHROPIC_API_KEY`, compose uses a deterministic **stub** so laptop dry-runs still work. Retrieval still needs Qdrant + TEI (or inject fixtures via smoke corpus). When evidence is missing, the response is the hard hedge message regardless of stub/Anthropic.
+Without `LLM_PROVIDER=stub` (or injecting `StubChatModel`), compose calls the selected provider. Retrieval still needs Qdrant + TEI (or inject fixtures via smoke corpus). When evidence is missing, the response is the hard hedge message regardless of stub/Anthropic/Ollama.
 
 ### Live smoke (Sprint 13 exit)
 
@@ -242,7 +257,9 @@ Expect `hedge=False`, at least one retrieved chunk, and a grounded stub answer c
 
 ## Modules
 
-- `api/app/agent/state.py`, `graph.py`, `run.py`, `checkpointer.py`, `policy.py`, `llm.py`, `guardrails.py`, `prompts.py`
+- `api/app/agent/runtime.py` — `AgentRuntime` Protocol + `default_agent_runtime()`
+- `api/app/agent/langgraph_adapter.py` — LangGraph `StateGraph` + invoke (first adapter)
+- `api/app/agent/state.py`, `graph.py` (re-export), `run.py` (product facade), `checkpointer.py`, `policy.py`, `llm.py`, `guardrails.py`, `prompts.py`
 - `api/app/agent/workflows/` — registry, classifier rules, tool Strategies (see **Workflow registry & Strategies** above)
 - `api/app/agent/nodes/{route,retrieve,compose,tools}.py`
 - `api/app/agent/routes.py` — `POST /agent/dry-run`, config / schedules

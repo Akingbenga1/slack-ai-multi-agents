@@ -1,4 +1,8 @@
-"""Haiku / Sonnet model-tier policy (Sprint 13.3)."""
+"""Generic model-tier policy (Sprint 13.3 / 33.3).
+
+Graph uses ``fast`` / ``capable`` only. Concrete vendor model ids are
+resolved inside each LLM adapter — not here.
+"""
 
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ def detect_complexity_flags(
     *,
     workflow: WorkflowName = "qa",
 ) -> list[str]:
-    """Return complexity flag names that justify Sonnet escalation."""
+    """Return complexity flag names that justify capable-tier escalation."""
     text = (question or "").strip()
     flags: list[str] = []
     if workflow in _ESCALATE_WORKFLOWS:
@@ -56,9 +60,9 @@ def detect_complexity_flags(
 def choose_model_tier(
     *,
     flags: Iterable[str] | None = None,
-    default: ModelTier = "haiku",
+    default: ModelTier = "fast",
 ) -> ModelTier:
-    """Default Haiku; escalate to Sonnet when any complexity flag is set."""
+    """Default fast; escalate to capable when any complexity flag is set."""
     if flags and any(flags):
-        return "sonnet"
+        return "capable"
     return default

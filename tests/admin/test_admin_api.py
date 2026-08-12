@@ -262,6 +262,78 @@ def test_admin_suspend_and_budget_override(
         app.dependency_overrides.clear()
 
 
+def test_admin_plan_override(settings: Settings, monkeypatch: pytest.MonkeyPatch):
+    tenant = Tenant(
+        id=DEMO_TENANT_ID,
+        slug="demo-org",
+        name="Demo Organisation",
+        status="active",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    db = _FakeDB([tenant])
+    db.billing[tenant.id] = BillingCustomer(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        plan_status="inactive",
+        plan_source="stripe",
+        entitlements={"agent": False},
+        meta={},
+    )
+
+    monkeypatch.setattr(
+        "api.app.admin.actions.ensure_billing_customer",
+        lambda _db, tenant_id, **_kw: db.billing[DEMO_TENANT_ID],
+    )
+
+    def _fake_db():
+        yield db
+
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_db] = _fake_db
+    try:
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {_owner_token(settings)}"}
+
+            denied = client.patch(
+                f"/admin/tenants/{DEMO_TENANT_ID}/plan",
+                headers={"Authorization": f"Bearer {_admin_token(settings)}"},
+                json={"plan_status": "active", "reason": "trial"},
+            )
+            assert denied.status_code == 403
+
+            activate = client.patch(
+                f"/admin/tenants/{DEMO_TENANT_ID}/plan",
+                headers=headers,
+                json={"plan_status": "active", "reason": "support trial"},
+            )
+            assert activate.status_code == 200
+            body = activate.json()
+            assert body["plan_status"] == "active"
+            assert body["plan_source"] == "admin"
+            assert body["override_reason"] == "support trial"
+            assert body["entitlements"]["agent"] is True
+
+            billing = db.billing[tenant.id]
+            assert billing.plan_status == "active"
+            assert billing.plan_source == "admin"
+            assert any(a.action == "tenant.plan.override" for a in db.audit)
+
+            deactivate = client.patch(
+                f"/admin/tenants/{DEMO_TENANT_ID}/plan",
+                headers=headers,
+                json={"plan_status": "inactive", "reason": "trial ended"},
+            )
+            assert deactivate.status_code == 200
+            body2 = deactivate.json()
+            assert body2["plan_status"] == "inactive"
+            assert body2["plan_source"] == "stripe"
+            assert body2["override_reason"] is None
+            assert body2["entitlements"]["agent"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_admin_create_tenant(settings: Settings, monkeypatch: pytest.MonkeyPatch):
     tenant = Tenant(
         id=uuid4(),
@@ -356,8 +428,8 @@ def test_admin_health_owner_only(settings: Settings, monkeypatch: pytest.MonkeyP
             "checks": {
                 "postgres": {"status": "ok"},
                 "redis": {"status": "ok"},
-                "qdrant": {"status": "ok"},
-                "tei": {"status": "ok"},
+                "vector_store": {"adapter": "qdrant", "status": "ok"},
+                "embedding": {"adapter": "tei", "status": "ok"},
             },
         },
     )

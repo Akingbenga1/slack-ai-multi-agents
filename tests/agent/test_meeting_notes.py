@@ -84,14 +84,14 @@ def test_compose_uses_notes_prompt():
                 }
             ],
             "workflow": "meeting_notes",
-            "model_tier": "sonnet",
+            "model_tier": "capable",
             "question": "Meeting notes from the beta call",
             "meeting_draft": "# Meeting notes: beta\n\n## Action items\n",
         }
     )
     assert out["hedge"] is False
     assert seen["system"] == SYSTEM_MEETING_NOTES
-    assert seen["tier"] == "sonnet"
+    assert seen["tier"] == "capable"
     assert "Draft outline:" in seen["user"]
 
 
@@ -123,12 +123,12 @@ def test_run_agent_meeting_notes_via_mcp():
         record_usage=False,
     )
     assert out["workflow"] == "meeting_notes"
-    assert out["model_tier"] == "sonnet"
+    assert out["model_tier"] == "capable"
     assert calls == ["draft_meeting_notes"]
     assert out["hedge"] is False
     assert out["meeting_draft"]
     assert "Meeting notes" in out["meeting_draft"]
-    assert "stub:sonnet" in out["answer"]
+    assert "stub:capable" in out["answer"]
 
 
 def test_notes_helper_prefers_slack_then_widens():

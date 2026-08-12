@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from api.app.blob_store import resolve_blob_store
 from api.app.ingest.documents.extract import (
     UnsupportedDocumentFormatError,
     extract_document,
@@ -206,13 +207,10 @@ def _store_raw_attachment(
     filename: str,
     data: bytes,
 ) -> str:
-    """Store unsupported-extension bytes under tenant dir (isolation only)."""
+    """Store unsupported-extension bytes under the tenant blob prefix."""
     cid = require_client_id(client_id)
     safe = sanitize_filename(filename)
     upload_id = str(uuid4())
-    tenant_dir = Path(upload_root) / cid
-    tenant_dir.mkdir(parents=True, exist_ok=True)
-    stored_filename = f"{upload_id}_{safe}"
-    absolute = tenant_dir / stored_filename
-    absolute.write_bytes(data)
-    return f"{cid}/{stored_filename}"
+    key = f"{cid}/{upload_id}_{safe}"
+    store = resolve_blob_store(upload_root=upload_root)
+    return store.put(client_id=cid, key=key, data=data)

@@ -72,13 +72,13 @@ Table `usage_events` (tenant_id, event_type, units, meta, created_at).
 | `sync_run` | Live Slack history sync succeeded |
 | `ingest` | Upload ingest succeeded |
 | `job` | Heartbeat (and generic jobs) succeeded |
-| `llm_tokens` | LangGraph compose (Anthropic or stub token estimate) |
+| `llm_tokens` | LangGraph compose (selected chat adapter or stub token estimate) |
 | `report_post` | Recurring report channel posts (Sprint 17) |
 
 ```python
 from api.app.governance.usage import record_usage, EVENT_LLM_TOKENS
 
-record_usage(db, tenant_id, EVENT_LLM_TOKENS, units=1200, meta={"model": "haiku"})
+record_usage(db, tenant_id, EVENT_LLM_TOKENS, units=1200, meta={"model": "claude-3-5-haiku-latest"})
 ```
 
 Budget sums: `jobs_daily` ← `job`/`sync_run`/`ingest`/`report_post`/`file_job`/`pdf_generate`/`file_rename`; token budgets ← `llm_tokens`.
