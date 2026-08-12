@@ -1,7 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { AgentSettingsPanel } from "@/components/AgentSettingsPanel";
-import { OrgNav } from "@/components/OrgNav";
 import { sessionTenantId } from "@/lib/tenant";
 
 export default async function AgentSettingsPage() {
@@ -9,7 +8,7 @@ export default async function AgentSettingsPage() {
   const tenantId = sessionTenantId(session?.user?.tenantId);
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
       <h1 style={{ marginTop: 0 }}>Agent settings</h1>
       <p>
         Manage your AI agent name, instructions, channel allowlist, and job
@@ -23,7 +22,6 @@ export default async function AgentSettingsPage() {
         accessToken={session?.accessToken ?? null}
         tenantId={tenantId}
       />
-      <OrgNav current="agent" />
     </main>
   );
 }

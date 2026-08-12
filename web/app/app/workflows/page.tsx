@@ -1,6 +1,5 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { OrgNav } from "@/components/OrgNav";
 import { WorkflowsPanel } from "@/components/WorkflowsPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -11,7 +10,7 @@ export default async function WorkflowsPage() {
   return (
     <main
       style={{
-        padding: "2rem",
+        padding: "0 2rem 2rem",
         fontFamily: "system-ui, sans-serif",
         maxWidth: 800,
       }}
@@ -31,7 +30,6 @@ export default async function WorkflowsPage() {
         accessToken={session?.accessToken ?? null}
         tenantId={tenantId}
       />
-      <OrgNav current="workflows" />
     </main>
   );
 }

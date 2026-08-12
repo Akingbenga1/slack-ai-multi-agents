@@ -1,6 +1,5 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { OrgNav } from "@/components/OrgNav";
 import { SlackConnectPanel } from "@/components/SlackConnectPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -26,7 +25,7 @@ export default async function SlackConnectPage({ searchParams }: Props) {
   const error = param(params.error) ?? null;
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
       <h1 style={{ marginTop: 0 }}>Slack</h1>
       <p>
         Connect your Slack workspace so the agent can join your team (OR-08).
@@ -41,7 +40,6 @@ export default async function SlackConnectPage({ searchParams }: Props) {
         connectedFlag={connected}
         errorFlag={error}
       />
-      <OrgNav current="slack" />
     </main>
   );
 }

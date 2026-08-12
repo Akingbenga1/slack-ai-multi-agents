@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { OrgNav } from "@/components/OrgNav";
 import { PortalStatusBanners } from "@/components/PortalStatusBanners";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -10,7 +9,7 @@ export default async function OrgAppHome() {
   const tenantId = sessionTenantId(session?.user?.tenantId);
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
       <h1 style={{ marginTop: 0 }}>Organisation portal</h1>
       <p>
         Configure your agent, upload knowledge, and review usage — without waiting
@@ -48,7 +47,6 @@ export default async function OrgAppHome() {
           <Link href="/app/slack">Slack</Link> — connect workspace / status
         </li>
       </ul>
-      <OrgNav current="home" />
     </main>
   );
 }

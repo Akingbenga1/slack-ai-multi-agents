@@ -1,7 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { BillingActions } from "@/components/BillingActions";
-import { OrgNav } from "@/components/OrgNav";
 import { sessionTenantId } from "@/lib/tenant";
 
 type Props = {
@@ -36,7 +35,7 @@ export default async function BillingPage({ searchParams }: Props) {
     checkout === "success" || checkout === "cancel" ? checkout : null;
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
       <h1 style={{ marginTop: 0 }}>Billing</h1>
       <p>
         Pay for the organisation plan via Stripe Checkout, or open the Customer
@@ -62,7 +61,6 @@ export default async function BillingPage({ searchParams }: Props) {
         tenantId={tenantId}
         checkoutOutcome={checkoutOutcome}
       />
-      <OrgNav current="billing" />
     </main>
   );
 }

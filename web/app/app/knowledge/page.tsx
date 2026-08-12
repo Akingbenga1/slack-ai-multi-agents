@@ -1,7 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { KnowledgePanel } from "@/components/KnowledgePanel";
-import { OrgNav } from "@/components/OrgNav";
 import { sessionTenantId } from "@/lib/tenant";
 
 export default async function KnowledgePage() {
@@ -9,7 +8,7 @@ export default async function KnowledgePage() {
   const tenantId = sessionTenantId(session?.user?.tenantId);
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 800 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 800 }}>
       <h1 style={{ marginTop: 0 }}>Knowledge</h1>
       <p>
         Upload documents or Slack history, watch ingest status, and trigger live
@@ -23,7 +22,6 @@ export default async function KnowledgePage() {
         accessToken={session?.accessToken ?? null}
         tenantId={tenantId}
       />
-      <OrgNav current="knowledge" />
     </main>
   );
 }

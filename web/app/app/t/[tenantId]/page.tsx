@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { OrgNav } from "@/components/OrgNav";
 import { sessionTenantId, tenantMatchesSession } from "@/lib/tenant";
 
 type Props = {
@@ -23,7 +22,7 @@ export default async function TenantScopedAppPage({ params }: Props) {
   }
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 640 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 640 }}>
       <h1 style={{ marginTop: 0 }}>Tenant access denied</h1>
       <p role="alert" style={{ color: "#b00020" }}>
         You cannot open another organisation&apos;s portal routes (OR-09). Your
@@ -36,7 +35,6 @@ export default async function TenantScopedAppPage({ params }: Props) {
         ) : null}
         .
       </p>
-      <OrgNav current="home" />
     </main>
   );
 }

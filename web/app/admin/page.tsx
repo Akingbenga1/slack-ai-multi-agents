@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { AdminNav } from "@/components/AdminNav";
 
 export default async function AdminHome() {
   const session = await getServerSession(authOptions);
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif", maxWidth: 900 }}>
+    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 900 }}>
       <h1 style={{ marginTop: 0 }}>Platform admin</h1>
       <p>
         Cross-tenant oversight — plan status, Slack connection, sync health, and
@@ -25,7 +24,6 @@ export default async function AdminHome() {
           <Link href="/admin/health">Health</Link> — Compose services + error rates
         </li>
       </ul>
-      <AdminNav current="home" />
     </main>
   );
 }
