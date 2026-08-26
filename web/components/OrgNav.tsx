@@ -11,7 +11,7 @@ const LINK_STYLE: CSSProperties = {
 const NAV_STYLE: CSSProperties = {
   marginBottom: "1.5rem",
   paddingBottom: "1rem",
-  borderBottom: "1px solid #e5e5e5",
+  borderBottom: "1px solid var(--nav-border)",
   fontSize: "0.95rem",
 };
 
@@ -65,7 +65,7 @@ export function OrgNav() {
           {item.label}
         </Link>
       ))}
-      <Link href="/invite" style={LINK_STYLE}>
+      <Link href="/app/invite" style={LINK_STYLE}>
         Invite
       </Link>
       <Link href="/">Site home</Link>

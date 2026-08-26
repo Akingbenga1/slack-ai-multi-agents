@@ -9,9 +9,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from api.app.agent.state import ModelTier, WorkflowName
+from api.app.agent.state import ModelTier
 
-# Escalation cues — keep heuristic; LLM router can refine later.
 _COMPLEXITY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("compare", re.compile(r"\b(compare|contrast|versus|vs\.?)\b", re.I)),
     ("analyze", re.compile(r"\b(analy[sz]e|deep.?dive|trade-?off|synthesize)\b", re.I)),
@@ -19,7 +18,7 @@ _COMPLEXITY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("long_form", re.compile(r".{400,}", re.S)),
 ]
 
-_ESCALATE_WORKFLOWS: frozenset[WorkflowName] = frozenset(
+_ESCALATE_WORKFLOWS: frozenset[str] = frozenset(
     {
         "summarize",
         "status",
@@ -37,7 +36,7 @@ _ESCALATE_WORKFLOWS: frozenset[WorkflowName] = frozenset(
 def detect_complexity_flags(
     question: str,
     *,
-    workflow: WorkflowName = "qa",
+    workflow: str = "qa",
 ) -> list[str]:
     """Return complexity flag names that justify capable-tier escalation."""
     text = (question or "").strip()

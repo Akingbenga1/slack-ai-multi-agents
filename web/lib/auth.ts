@@ -27,6 +27,30 @@ function identityProviderName(): string {
   return (process.env.IDENTITY_PROVIDER || "credentials").trim().toLowerCase();
 }
 
+const REFRESH_SKEW_SECONDS = 5 * 60;
+
+function jwtExpSeconds(token: string): number | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(
+      Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
+        "utf8",
+      ),
+    ) as { exp?: number };
+    return typeof decoded.exp === "number" ? decoded.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function tokenNeedsRefresh(accessToken: string): boolean {
+  const exp = jwtExpSeconds(accessToken);
+  if (exp === null) return true;
+  const now = Math.floor(Date.now() / 1000);
+  return exp <= now + REFRESH_SKEW_SECONDS;
+}
+
 /** Mint FastAPI Bearer JWT (credentials validated server-side via IdentityProvider). */
 async function fetchApiAccessToken(
   email: string,
@@ -39,6 +63,22 @@ async function fetchApiAccessToken(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { access_token?: string };
+    return data.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshApiAccessToken(accessToken: string): Promise<string | null> {
+  const base = apiBaseUrl();
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base}/auth/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { access_token?: string };
@@ -134,6 +174,17 @@ export const authOptions: NextAuthOptions = {
         token.tenantId = u.tenantId ?? null;
         token.accessToken = u.accessToken ?? null;
       }
+
+      const accessToken = token.accessToken as string | null | undefined;
+      if (accessToken && tokenNeedsRefresh(accessToken)) {
+        const refreshed = await refreshApiAccessToken(accessToken);
+        // Keep the existing token if refresh fails — clearing it locks the UI out
+        // of API calls until the user signs in again.
+        if (refreshed) {
+          token.accessToken = refreshed;
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {

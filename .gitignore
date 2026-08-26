@@ -15,8 +15,12 @@ service-account*.json
 # Local data (uploads, dumps, corpora)
 data/
 
+# Dry-run activity log (project root)
+app.log
+
 # Ignore Project-Documents copies if present at repo root
-/Project-Documents/*
+/Project-Documents/
+/Sprints
 
 # Python
 .venv/
@@ -41,3 +45,6 @@ web/out/
 Thumbs.db
 .idea/
 .vscode/
+tldr_search.py
+web/node_modules
+Feature-implementations.node_modules

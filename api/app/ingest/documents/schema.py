@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class DocumentFormat(StrEnum):
-    """Supported org-uploaded document formats (Sprint 8)."""
+    """Supported org-uploaded document formats (Sprint 8+)."""
 
     PDF = "pdf"
     DOCX = "docx"
     XLSX = "xlsx"
     CSV = "csv"
+    MD = "md"
+    TXT = "txt"
 
 
 class DocumentUnitKind(StrEnum):

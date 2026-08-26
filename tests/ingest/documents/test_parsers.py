@@ -92,8 +92,35 @@ def test_detect_format_from_extension_and_mime():
     assert detect_document_format(filename="a.PDF") is DocumentFormat.PDF
     assert detect_document_format(content_type="text/csv; charset=utf-8") is DocumentFormat.CSV
     assert detect_document_format(format="docx") is DocumentFormat.DOCX
+    assert detect_document_format(filename="notes.md") is DocumentFormat.MD
+    assert detect_document_format(filename="notes.txt") is DocumentFormat.TXT
+    assert (
+        detect_document_format(filename="readme.md", content_type="text/plain")
+        is DocumentFormat.MD
+    )
     with pytest.raises(UnsupportedDocumentFormatError):
-        detect_document_format(filename="notes.txt")
+        detect_document_format(filename="notes.pptx")
+
+
+def test_extract_markdown_sections():
+    md = "# Title\n\nIntro para.\n\n## Steps\n\n- one\n- two\n"
+    result = extract_document(md.encode("utf-8"), filename="guide.md")
+    assert result.source_format is DocumentFormat.MD
+    assert result.title == "Title"
+    assert len(result.units) >= 2
+    assert result.units[0].locator == "section=1"
+    assert "Title" in result.units[0].text
+    assert any("Steps" in u.text for u in result.units)
+
+
+def test_extract_txt_paragraphs():
+    raw = b"First block.\n\nSecond block.\n"
+    result = extract_document(raw, filename="notes.txt")
+    assert result.source_format is DocumentFormat.TXT
+    assert len(result.units) == 2
+    assert result.units[0].locator == "paragraph=1"
+    assert result.units[0].text == "First block."
+    assert result.units[1].text == "Second block."
 
 
 def test_extract_pdf_pages():

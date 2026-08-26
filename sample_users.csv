@@ -1,0 +1,6 @@
+Name,Email,Role,Department,Status
+Alice Johnson,alice@example.com,Engineer,Engineering,Active
+Bob Smith,bob@example.com,Designer,Product,Active
+Carol White,carol@example.com,Manager,Operations,Active
+David Brown,david@example.com,Analyst,Finance,Inactive
+Eva Martinez,eva@example.com,Developer,Engineering,Active

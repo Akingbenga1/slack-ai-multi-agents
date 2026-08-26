@@ -365,3 +365,20 @@ def dispatch_recurring_reports(
         log_label="dispatch_recurring_reports",
         extra={"cadence": cadence},
     )
+
+
+@celery_app.task(name="worker.refresh_tldr_cli_db", bind=True)
+def refresh_tldr_cli_db(self) -> dict[str, Any]:
+    """System-wide: pull upstream tldr pages and rebuild discovery SQLite DB."""
+    from api.app.discovery.tldr_store import rebuild_db_from_upstream
+
+    settings = get_settings()
+    db_path = settings.discovery_cli_db_path_resolved
+    logger.info("refresh_tldr_cli_db start db=%s", db_path)
+    count = rebuild_db_from_upstream(db_path)
+    logger.info("refresh_tldr_cli_db done pages=%s db=%s", count, db_path)
+    return {
+        "task_id": getattr(getattr(self, "request", None), "id", None),
+        "db_path": str(db_path),
+        "page_count": count,
+    }

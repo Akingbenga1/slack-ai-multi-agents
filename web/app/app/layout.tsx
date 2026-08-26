@@ -1,22 +1,20 @@
-import { OrgNav } from "@/components/OrgNav";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { OrgDashboardShell } from "@/components/dashboard/OrgDashboardShell";
 
-export default function OrgAppLayout({
+export default async function OrgAppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await getServerSession(authOptions);
+
   return (
-    <>
-      <div
-        style={{
-          padding: "1.25rem 2rem 0",
-          fontFamily: "system-ui, sans-serif",
-          maxWidth: 800,
-        }}
-      >
-        <OrgNav />
-      </div>
+    <OrgDashboardShell
+      userEmail={session?.user?.email ?? null}
+      userRole={session?.user?.role ?? null}
+    >
       {children}
-    </>
+    </OrgDashboardShell>
   );
 }

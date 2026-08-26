@@ -8,7 +8,8 @@ Next.js self-serve surfaces for org admins. Demo seed (`admin@example.com` / `ad
 | ---- | ------- |
 | `/signup` | Public org registration — creates tenant + admin, then session into `/app` |
 | `/login` | Sign-in only (existing users) |
-| `/invite` | Create / accept org-admin magic-link invites (no SMTP; copy `{WEB_APP_URL}/invite?token=…`) |
+| `/invite` | Accept org-admin magic-link invites (`?token=…`; no SMTP) |
+| `/app/invite` | Create / list invite links (org admin portal) |
 | `/app` | Portal home |
 | `/app/agent` | Agent name, system prompt, channel allowlist, job schedules (OR-03 / OR-04) |
 | `/app/knowledge` | Uploads, ingest job status, Slack sync trigger/status (OR-05 / OR-06) |

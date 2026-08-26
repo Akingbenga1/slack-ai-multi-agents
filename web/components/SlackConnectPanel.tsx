@@ -104,7 +104,7 @@ export function SlackConnectPanel({
         </p>
       ) : null}
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}
@@ -132,7 +132,7 @@ export function SlackConnectPanel({
               {data.team_id ? ` (${data.team_id})` : ""}
             </p>
             {data.installed_at ? (
-              <p style={{ margin: "0 0 0.35rem", color: "#555", fontSize: "0.85rem" }}>
+              <p style={{ margin: "0 0 0.35rem", color: "var(--muted)", fontSize: "0.85rem" }}>
                 Installed {data.installed_at}
               </p>
             ) : null}
@@ -163,12 +163,12 @@ export function SlackConnectPanel({
       </div>
 
       {data && !data.slack_configured ? (
-        <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
           API is missing <code>SLACK_CLIENT_ID</code> — see{" "}
           <code>docs/slack-app-setup.md</code>.
         </p>
       ) : (
-        <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
           OAuth redirect must match{" "}
           <code>{"{PUBLIC_BASE_URL}/slack/oauth/callback"}</code>. After install,
           invite the bot to channels. Details:{" "}

@@ -160,3 +160,120 @@ def test_upload_cross_tenant_denied(client: TestClient):
         files={"file": ("a.csv", b"a,b\n1,2\n", "text/csv")},
     )
     assert res.status_code == 403
+
+
+def test_upload_dry_run_ingests_sync(
+    client: TestClient, upload_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from api.app.ingest.upload_ingest import UploadIngestResult
+
+    captured: dict = {}
+
+    def _fake_ingest(**kwargs):
+        captured.update(kwargs)
+        return UploadIngestResult(
+            client_id=kwargs["client_id"],
+            file_role=FileRole.DOCUMENT,
+            filename=kwargs["filename"],
+            unit_or_message_count=1,
+            chunk_count=2,
+            point_ids=["p1", "p2"],
+        )
+
+    monkeypatch.setattr("api.app.ingestion.routes.ingest_upload", _fake_ingest)
+    monkeypatch.setattr(
+        "api.app.ingestion.routes.require_entitlement",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "api.app.ingestion.routes.require_budget",
+        lambda *_a, **_k: None,
+    )
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        upload_dir=str(upload_root),
+        jwt_secret="test-secret-at-least-32-chars-long!",
+    )
+
+    token = _token()
+    res = client.post(
+        "/ingestion/dry-run",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"file_role": "document"},
+        files={"file": ("policy.csv", b"title,body\nHello,World\n", "text/csv")},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "ingested"
+    assert body["chunk_count"] == 2
+    assert body["point_count"] == 2
+    assert body["point_ids"] == ["p1", "p2"]
+    assert body["file_role"] == "document"
+    assert body["client_id"] == str(DEMO_TENANT_ID)
+    assert (upload_root / body["relative_path"]).is_file()
+    assert captured["relative_path"] == body["relative_path"]
+    assert captured["filename"] == "policy.csv"
+
+
+def test_upload_dry_run_requires_auth(client: TestClient):
+    res = client.post(
+        "/ingestion/dry-run",
+        data={"file_role": "document"},
+        files={"file": ("a.csv", b"x,y\n1,2\n", "text/csv")},
+    )
+    assert res.status_code == 401
+
+
+def test_upload_dry_run_rejects_wrong_extension(
+    client: TestClient, upload_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        "api.app.ingestion.routes.require_entitlement",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "api.app.ingestion.routes.require_budget",
+        lambda *_a, **_k: None,
+    )
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        upload_dir=str(upload_root),
+        jwt_secret="test-secret-at-least-32-chars-long!",
+    )
+    token = _token()
+    res = client.post(
+        "/ingestion/dry-run",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"file_role": "document"},
+        files={"file": ("export.zip", b"PK\x03\x04", "application/zip")},
+    )
+    assert res.status_code == 400
+
+
+def test_upload_dry_run_ingest_error_maps_to_502(
+    client: TestClient, upload_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def _boom(**_kwargs):
+        raise RuntimeError("tei down")
+
+    monkeypatch.setattr("api.app.ingestion.routes.ingest_upload", _boom)
+    monkeypatch.setattr(
+        "api.app.ingestion.routes.require_entitlement",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "api.app.ingestion.routes.require_budget",
+        lambda *_a, **_k: None,
+    )
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        upload_dir=str(upload_root),
+        jwt_secret="test-secret-at-least-32-chars-long!",
+    )
+
+    token = _token()
+    res = client.post(
+        "/ingestion/dry-run",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"file_role": "document"},
+        files={"file": ("policy.csv", b"title,body\nHello,World\n", "text/csv")},
+    )
+    assert res.status_code == 502
+    assert res.json()["detail"] == "ingest_failed"

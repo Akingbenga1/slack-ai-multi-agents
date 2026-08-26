@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { PageHeader } from "@/components/dashboard/PageHeader";
 import { TenantDetailPanel } from "@/components/TenantDetailPanel";
 
 type Props = {
@@ -11,12 +12,20 @@ export default async function AdminTenantDetailPage({ params }: Props) {
   const resolved = await params;
 
   return (
-    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
-      <h1 style={{ marginTop: 0 }}>Tenant detail</h1>
+    <>
+      <PageHeader
+        title="Tenant detail"
+        description="Plan, Slack connection, sync status, and support actions for this organisation."
+        breadcrumbs={[
+          { label: "Overview", href: "/admin" },
+          { label: "Tenants", href: "/admin/tenants" },
+          { label: "Detail" },
+        ]}
+      />
       <TenantDetailPanel
         accessToken={session?.accessToken ?? null}
         tenantId={resolved.tenantId}
       />
-    </main>
+    </>
   );
 }

@@ -176,7 +176,7 @@ export function UsageSummaryPanel({ accessToken, tenantId }: Props) {
       </div>
 
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}
@@ -210,7 +210,7 @@ export function UsageSummaryPanel({ accessToken, tenantId }: Props) {
           <section>
             <h2 style={{ fontSize: "1.1rem", margin: "0 0 0.5rem" }}>Budgets</h2>
             {data.budgets.every((b) => b.limit === 0) ? (
-              <p style={{ margin: 0, color: "#555" }}>
+              <p style={{ margin: 0, color: "var(--muted)" }}>
                 No budgets while the plan is inactive — subscribe under Billing.
               </p>
             ) : (
@@ -228,7 +228,7 @@ export function UsageSummaryPanel({ accessToken, tenantId }: Props) {
           <section>
             <h2 style={{ fontSize: "1.1rem", margin: "0 0 0.5rem" }}>By event type</h2>
             {data.by_event_type.length === 0 ? (
-              <p style={{ margin: 0, color: "#555" }}>No events in this window.</p>
+              <p style={{ margin: 0, color: "var(--muted)" }}>No events in this window.</p>
             ) : (
               <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 480 }}>
                 <thead>
@@ -266,7 +266,7 @@ export function UsageSummaryPanel({ accessToken, tenantId }: Props) {
               Recent events
             </h2>
             {!events || events.length === 0 ? (
-              <p style={{ margin: 0, color: "#555" }}>No recent usage events.</p>
+              <p style={{ margin: 0, color: "var(--muted)" }}>No recent usage events.</p>
             ) : (
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
@@ -304,7 +304,7 @@ export function UsageSummaryPanel({ accessToken, tenantId }: Props) {
               Recent jobs {failedOnly ? "(errors)" : ""}
             </h2>
             {!jobs || jobs.length === 0 ? (
-              <p style={{ margin: 0, color: "#555" }}>
+              <p style={{ margin: 0, color: "var(--muted)" }}>
                 {failedOnly ? "No failed jobs." : "No recent jobs."}
               </p>
             ) : (
@@ -336,7 +336,7 @@ export function UsageSummaryPanel({ accessToken, tenantId }: Props) {
                       <td
                         style={{
                           padding: "0.35rem 0.5rem",
-                          color: j.error ? "#b00020" : "#555",
+                          color: j.error ? "var(--error)" : "var(--muted)",
                           fontSize: "0.85rem",
                         }}
                       >

@@ -1,15 +1,18 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { PageHeader } from "@/components/dashboard/PageHeader";
 import { TenantListPanel } from "@/components/TenantListPanel";
 
 export default async function AdminTenantsPage() {
   const session = await getServerSession(authOptions);
 
   return (
-    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 960 }}>
-      <h1 style={{ marginTop: 0 }}>Tenants</h1>
-      <p>Plan status, Slack connected, and last sync across organisations.</p>
+    <>
+      <PageHeader
+        title="Tenants"
+        description="Browse organisations — click a name for details, use the row menu for billing and access actions."
+      />
       <TenantListPanel accessToken={session?.accessToken ?? null} />
-    </main>
+    </>
   );
 }

@@ -25,6 +25,8 @@ for unit in doc.units:
 | DOCX | `extract_docx` | paragraphs + tables in body order |
 | XLSX | `extract_xlsx` | one unit per non-empty row (`sheet=Name!row=N`); all sheets by default |
 | CSV | `extract_csv` | one unit per non-empty row (`row=N`) as `header: value` |
+| Markdown | `extract_markdown` | one unit per ATX heading section (`section=N`), else blank-line paragraphs |
+| Plain text | `extract_txt` | one unit per blank-line paragraph (`paragraph=N`) |
 
 Unsupported extension / MIME raises `UnsupportedDocumentFormatError`. A readable file with no extractable text returns `units=[]` (soft empty).
 

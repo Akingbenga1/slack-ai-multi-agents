@@ -82,13 +82,19 @@ function joinUrl(path: string): string {
 }
 
 function detailFromBody(body: unknown, fallback: string): string {
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "detail" in body &&
-    typeof (body as { detail: unknown }).detail === "string"
-  ) {
-    return (body as { detail: string }).detail;
+  if (typeof body === "object" && body !== null && "detail" in body) {
+    const detail = (body as { detail: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) {
+      return detail;
+    }
+    if (
+      typeof detail === "object" &&
+      detail !== null &&
+      "message" in detail &&
+      typeof (detail as { message: unknown }).message === "string"
+    ) {
+      return (detail as { message: string }).message;
+    }
   }
   if (typeof body === "string" && body.trim()) {
     return body;
@@ -151,5 +157,8 @@ export const apiClient = {
   },
   patch<T>(path: string, opts: ApiRequestOptions): Promise<T | null> {
     return request<T>("PATCH", path, opts);
+  },
+  delete<T = null>(path: string, opts: ApiRequestOptions): Promise<T | null> {
+    return request<T>("DELETE", path, opts);
   },
 };

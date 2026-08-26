@@ -1,15 +1,17 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
-  const shell =
-    session?.user?.role === "platform_owner"
-      ? "/admin"
-      : session?.user?.role === "org_admin"
-        ? "/app"
-        : null;
+
+  if (session?.user?.role === "platform_owner") {
+    redirect("/admin");
+  }
+  if (session?.user?.role === "org_admin") {
+    redirect("/app");
+  }
 
   return (
     <main
@@ -32,24 +34,11 @@ export default async function Home() {
       >
         OK
       </p>
-      {session?.user ? (
-        <>
-          <p style={{ margin: 0, color: "#333" }}>
-            Signed in as {session.user.email} ({session.user.role}
-            {session.user.tenantId ? ` · tenant ${session.user.tenantId}` : ""})
-          </p>
-          <p style={{ margin: 0 }}>
-            {shell ? <Link href={shell}>Open portal</Link> : null} ·{" "}
-            <Link href="/invite">Invite rules</Link>
-          </p>
-        </>
-      ) : (
-        <p style={{ margin: 0 }}>
-          <Link href="/login">Sign in</Link>
-          {" · "}
-          <Link href="/signup">Create organisation</Link>
-        </p>
-      )}
+      <p style={{ margin: 0 }}>
+        <Link href="/login">Sign in</Link>
+        {" · "}
+        <Link href="/signup">Create organisation</Link>
+      </p>
     </main>
   );
 }

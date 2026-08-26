@@ -5,6 +5,7 @@ import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError, apiClient, getApiBaseUrl } from "@/lib/api";
+import panel from "@/components/dashboard/panel.module.css";
 
 type InviteRow = {
   id: string;
@@ -58,10 +59,10 @@ export function InvitePanel({
         Org admins can invite additional admins to the <strong>same</strong>{" "}
         organisation. Invited users cannot create a second org from the link.
       </p>
-      <p style={{ color: "#555" }}>
+      <p className={panel.meta}>
         There is no email send in this sprint — copy the magic-link URL
-        (<code>WEB_APP_URL/invite?token=…</code>, HMAC with <code>JWT_SECRET</code>
-        ). Sign in to create an invite, or open a link you were given.
+        (<code>WEB_APP_URL/invite?token=…</code>). Sign in to create an invite from{" "}
+        <Link href="/app/invite">Invite team</Link>, or open a link you were given.
       </p>
       <p>
         <Link href="/login">Sign in</Link>
@@ -127,49 +128,57 @@ function CreateInvite({
 
   return (
     <>
-      <p>
+      <p className={panel.sectionDesc}>
         Invite another <strong>org admin</strong> to this tenant. Copy the URL
         — SMTP is out of scope. They join this organisation only.
       </p>
-      <form
-        onSubmit={(ev) => void onSubmit(ev)}
-        style={{ display: "grid", gap: "0.75rem", maxWidth: 420 }}
-      >
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Email</span>
+      <form className={panel.formGrid} onSubmit={(ev) => void onSubmit(ev)}>
+        <label className={panel.formLabel}>
+          Email
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            style={{ padding: "0.5rem" }}
+            placeholder="colleague@example.com"
           />
         </label>
         {error ? (
-          <p style={{ color: "#b00020", margin: 0 }} role="alert">
+          <p className={panel.error} role="alert">
             {error}
           </p>
         ) : null}
-        <button type="submit" disabled={pending} style={{ padding: "0.6rem" }}>
-          {pending ? "Creating…" : "Create invite link"}
-        </button>
+        <div className={panel.formRow}>
+          <button type="submit" className={panel.btnPrimary} disabled={pending}>
+            {pending ? "Creating…" : "Create invite link"}
+          </button>
+        </div>
       </form>
       {lastUrl ? (
-        <p style={{ marginTop: "1rem" }}>
+        <p className={panel.infoBanner} style={{ marginTop: "1rem" }}>
           Copy this URL now:
           <br />
           <code style={{ wordBreak: "break-all" }}>{lastUrl}</code>
         </p>
       ) : null}
       {rows.length > 0 ? (
-        <ul style={{ marginTop: "1.5rem", lineHeight: 1.6 }}>
-          {rows.map((row) => (
-            <li key={row.id}>
-              {row.email} — {row.used_at ? "used" : "pending"}
-              {row.expires_at ? ` · expires ${row.expires_at}` : ""}
-            </li>
-          ))}
-        </ul>
+        <div style={{ marginTop: "1.5rem" }}>
+          <div className={panel.sectionHeader}>
+            <h2 className={panel.sectionTitle}>Recent invites</h2>
+            <span className={panel.sectionCount}>{rows.length}</span>
+          </div>
+          <ul className={panel.detailList}>
+            {rows.map((row) => (
+              <li key={row.id} className={panel.detailItem}>
+                <p className={panel.detailLabel}>{row.email}</p>
+                <p className={panel.detailValue}>
+                  {row.used_at ? "used" : "pending"}
+                  {row.expires_at ? ` · expires ${row.expires_at}` : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </>
   );
@@ -251,7 +260,7 @@ function AcceptInvite({ token }: { token: string }) {
 
   if (loadError) {
     return (
-      <p style={{ color: "#b00020" }} role="alert">
+      <p style={{ color: "var(--error)" }} role="alert">
         {loadError}
       </p>
     );
@@ -296,7 +305,7 @@ function AcceptInvite({ token }: { token: string }) {
           />
         </label>
         {error ? (
-          <p style={{ color: "#b00020", margin: 0 }} role="alert">
+          <p style={{ color: "var(--error)", margin: 0 }} role="alert">
             {error}
           </p>
         ) : null}

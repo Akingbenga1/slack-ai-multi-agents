@@ -5,7 +5,16 @@ from __future__ import annotations
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -14,12 +23,14 @@ from api.app.auth.tenant_resolve import resolve_tenant_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.session import get_db
 from api.app.settings import Settings, get_settings
+from api.app.uploads.routes import MAX_UPLOAD_BYTES
 from api.app.workflows.library import (
     MSG_FORBIDDEN_EDIT,
     MSG_NOT_FOUND,
     copy_template,
     get_template,
     list_templates,
+    store_workflow_template,
     template_to_dict,
     update_personal_draft,
 )
@@ -66,6 +77,14 @@ class EditDraftRequest(BaseModel):
     body_text: Optional[str] = None
 
 
+class WorkflowUploadResponse(WorkflowTemplateResponse):
+    created: bool = Field(
+        description="False when an existing shared template matched (idempotent)."
+    )
+    ingested_queued: bool = False
+    ingest_task_id: Optional[str] = None
+
+
 def _resolve_tenant(principal: AuthPrincipal) -> str:
     return resolve_tenant_for_principal(
         principal,
@@ -95,6 +114,76 @@ def list_workflow_templates(
     return WorkflowListResponse(
         client_id=client_id,
         templates=[WorkflowTemplateResponse(**template_to_dict(r)) for r in rows],
+    )
+
+
+@router.post("/upload", response_model=WorkflowUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_workflow_template(
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    file: Annotated[UploadFile, File(description="Workflow file (PDF, DOCX, XLSX, CSV, MD, TXT)")],
+    title: Annotated[
+        Optional[str],
+        Form(description="Optional title override; defaults from filename"),
+    ] = None,
+    enqueue_ingest: Annotated[
+        bool,
+        Form(description="Enqueue Qdrant ingest for document-parseable types (default false)"),
+    ] = False,
+) -> WorkflowUploadResponse:
+    """
+    Store a shared workflow template for the caller's organisation.
+
+    Persists to ``workflow_templates`` via the library store path (same as Slack
+    store). Does not run the agent. ``enqueue_ingest`` is off by default.
+    """
+    client_id = _resolve_tenant(principal)
+    filename = file.filename or "workflow.bin"
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds {MAX_UPLOAD_BYTES} bytes",
+        )
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file",
+        )
+
+    try:
+        result = store_workflow_template(
+            db,
+            client_id=client_id,
+            upload_root=settings.upload_dir_path,
+            filename=filename,
+            data=data,
+            title=(title or "").strip() or None,
+            content_type=file.content_type,
+            enqueue_ingest=enqueue_ingest,
+            meta={"source": "api_upload"},
+        )
+        payload = template_to_dict(result.template)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)[:300],
+        ) from exc
+
+    return WorkflowUploadResponse(
+        **payload,
+        created=result.created,
+        ingested_queued=result.ingested_queued,
+        ingest_task_id=result.task_id,
     )
 
 

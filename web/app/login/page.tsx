@@ -52,7 +52,7 @@ export default function LoginPage() {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "1.5rem" }}>Sign in</h1>
-        <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
           Demo: owner@example.com / owner123 → /admin · admin@example.com /
           admin123 → /app
         </p>
@@ -77,7 +77,7 @@ export default function LoginPage() {
           />
         </label>
         {error ? (
-          <p style={{ color: "#b00020", margin: 0 }} role="alert">
+          <p style={{ color: "var(--error)", margin: 0 }} role="alert">
             {error}
           </p>
         ) : null}

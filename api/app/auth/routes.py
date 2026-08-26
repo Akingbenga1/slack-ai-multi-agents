@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -20,7 +20,13 @@ from api.app.auth.invites import (
 )
 from api.app.auth.provider import get_identity_provider
 from api.app.auth.signup import register_organisation
-from api.app.auth.tokens import AuthPrincipal, RoleName, create_access_token
+from api.app.auth.tokens import (
+    AuthPrincipal,
+    RoleName,
+    create_access_token,
+    decode_access_token,
+    refresh_access_token,
+)
 from api.app.db.models import Membership
 from api.app.db.session import get_db
 from api.app.settings import Settings, get_settings
@@ -167,6 +173,36 @@ def issue_token(
     )
     return TokenResponse(
         access_token=token,
+        role=principal.role,
+        tenant_id=principal.tenant_id,
+        all_access=principal.all_access,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh_token(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TokenResponse:
+    """Mint a fresh JWT from a valid (possibly expired) bearer token."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    current = auth[7:].strip()
+    if not current:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    new_token = refresh_access_token(current, settings)
+    principal = decode_access_token(new_token, settings)
+    return TokenResponse(
+        access_token=new_token,
         role=principal.role,
         tenant_id=principal.tenant_id,
         all_access=principal.all_access,

@@ -70,6 +70,7 @@ class IngestJobListResponse(BaseModel):
     client_id: str
     jobs: list[IngestJobResponse]
 
+
 def _resolve_tenant(
     principal: AuthPrincipal,
     form_tenant_id: Optional[str],

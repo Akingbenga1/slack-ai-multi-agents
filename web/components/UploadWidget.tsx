@@ -103,13 +103,13 @@ export function UploadWidget({ accessToken, tenantId, onUploaded }: Props) {
       }}
     >
       <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Knowledge upload</h2>
-      <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+      <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
         Upload documents or Slack history dumps. Ingest runs via Celery (
         <code>POST /uploads</code>).
       </p>
 
       {!accessToken ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="status">
+        <p style={{ color: "var(--error)", margin: 0 }} role="status">
           API JWT missing. Ensure FastAPI is up, demo users are seeded, then
           re-login as org admin.
         </p>
@@ -154,7 +154,7 @@ export function UploadWidget({ accessToken, tenantId, onUploaded }: Props) {
       </form>
 
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}

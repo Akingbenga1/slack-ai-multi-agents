@@ -1,12 +1,49 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --muted: #64748b;
+  --muted-foreground: #475569;
+  --border: #e2e8f0;
+  --border-subtle: #f1f5f9;
+  --nav-border: #e2e8f0;
+  --error: #dc2626;
+  --success: #16a34a;
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --button-bg: #f1f5f9;
+  --button-fg: #0f172a;
+
+  --dash-bg: #f8fafc;
+  --dash-fg: #0f172a;
+  --sidebar-width: 16.5rem;
+  --sidebar-bg: #0f172a;
+  --sidebar-fg: #f8fafc;
+  --sidebar-muted: #94a3b8;
+  --sidebar-border: #334155;
+  --surface: #ffffff;
+  --accent: #22c55e;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #020617;
+    --foreground: #f8fafc;
+    --muted: #94a3b8;
+    --muted-foreground: #64748b;
+    --border: #334155;
+    --border-subtle: #1e293b;
+    --nav-border: #334155;
+    --error: #f87171;
+    --success: #4ade80;
+    --input-bg: #0f172a;
+    --input-border: #475569;
+    --button-bg: #1e293b;
+    --button-fg: #f8fafc;
+
+    --dash-bg: #020617;
+    --dash-fg: #f8fafc;
+    --sidebar-bg: #0f172a;
+    --surface: #0f172a;
   }
 }
 
@@ -19,7 +56,7 @@ body {
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -35,8 +72,73 @@ a {
   text-decoration: none;
 }
 
+input,
+textarea,
+select {
+  color: var(--foreground);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.625rem;
+  font: inherit;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  color: var(--button-fg);
+  background: var(--button-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--border);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+table {
+  width: 100%;
+}
+
 @media (prefers-color-scheme: dark) {
   html {
     color-scheme: dark;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

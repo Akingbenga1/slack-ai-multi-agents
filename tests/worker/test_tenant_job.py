@@ -21,6 +21,7 @@ def test_build_beat_schedule_uses_settings_intervals():
         slack_history_sync_interval_seconds=12,
         recurring_report_daily_interval_seconds=34,
         recurring_report_weekly_interval_seconds=56,
+        discovery_cli_update_interval_seconds=99,
     )
     schedule = build_beat_schedule(settings)
     assert schedule["slack-history-sync-hourly"]["schedule"] == 12.0
@@ -28,6 +29,8 @@ def test_build_beat_schedule_uses_settings_intervals():
     assert schedule["recurring-report-weekly"]["schedule"] == 56.0
     assert schedule["recurring-report-daily"]["kwargs"]["cadence"] == "daily"
     assert schedule["demo-tenant-heartbeat"]["task"] == "worker.heartbeat"
+    assert schedule["tldr-cli-db-refresh"]["task"] == "worker.refresh_tldr_cli_db"
+    assert schedule["tldr-cli-db-refresh"]["schedule"] == 99.0
 
 
 def test_heartbeat_uses_tenant_job_shell(monkeypatch: pytest.MonkeyPatch):

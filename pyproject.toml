@@ -11,7 +11,7 @@ dependencies = [
     "langgraph>=0.5,<0.7",
     "anthropic>=0.39.0,<0.50",
     "qdrant-client>=1.12.0,<2",
-    "httpx>=0.27.0,<0.29",
+    "httpx>=0.27.0,<0.28",
     "celery[redis]>=5.4.0,<6",
     "redis>=5.2.0,<6",
     "psycopg[binary]>=3.2.0,<4",
@@ -32,6 +32,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0.25,<3",
     "mcp>=1.12,<2",
     "fpdf2>=2.8.0,<3",
+    "tldr>=3.0.0,<4",
 ]
 
 [dependency-groups]

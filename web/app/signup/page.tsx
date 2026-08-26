@@ -100,7 +100,7 @@ export default function SignupPage() {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "1.5rem" }}>Create organisation</h1>
-        <p style={{ margin: 0, color: "#555", fontSize: "0.9rem" }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
           Register your org and admin account — no platform-owner ticket. You
           will land in the org portal. Paying, Slack, and agent setup stay
           self-serve after signup.
@@ -161,7 +161,7 @@ export default function SignupPage() {
           />
         </label>
         {error ? (
-          <p style={{ color: "#b00020", margin: 0 }} role="alert">
+          <p style={{ color: "var(--error)", margin: 0 }} role="alert">
             {error}
           </p>
         ) : null}

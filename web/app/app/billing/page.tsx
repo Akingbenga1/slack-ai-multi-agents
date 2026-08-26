@@ -1,5 +1,9 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import panel from "@/components/dashboard/panel.module.css";
+import { BillingTabNav } from "@/components/billing/BillingTabNav";
+import { orgBillingTabs } from "@/lib/billing-tabs";
 import { BillingActions } from "@/components/BillingActions";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -10,9 +14,7 @@ type Props = {
   >;
 };
 
-function param(
-  value: string | string[] | undefined,
-): string | undefined {
+function param(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
   return value;
 }
@@ -35,32 +37,24 @@ export default async function BillingPage({ searchParams }: Props) {
     checkout === "success" || checkout === "cancel" ? checkout : null;
 
   return (
-    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
-      <h1 style={{ marginTop: 0 }}>Billing</h1>
-      <p>
-        Pay for the organisation plan, or manage your subscription (payment
-        method / cancel) (OR-02).
-      </p>
-      <p>
-        Signed in as {session?.user?.email} ({session?.user?.role}
-        {tenantId ? ` · tenant ${tenantId}` : ""})
-      </p>
-      {banner ? (
-        <p
-          style={{
-            padding: "0.75rem 1rem",
-            background: "#f5f5f5",
-            borderRadius: 4,
-          }}
-        >
-          {banner}
-        </p>
-      ) : null}
-      <BillingActions
-        accessToken={session?.accessToken ?? null}
-        tenantId={tenantId}
-        checkoutOutcome={checkoutOutcome}
+    <>
+      <PageHeader
+        title="Billing"
+        description="Pay for the organisation plan, or manage your subscription and payment method."
+        breadcrumbs={[
+          { label: "Overview", href: "/app" },
+          { label: "Billing" },
+        ]}
       />
-    </main>
+      {banner ? <p className={panel.infoBanner}>{banner}</p> : null}
+      <BillingTabNav tabs={orgBillingTabs()} />
+      <div className={panel.section}>
+        <BillingActions
+          accessToken={session?.accessToken ?? null}
+          tenantId={tenantId}
+          checkoutOutcome={checkoutOutcome}
+        />
+      </div>
+    </>
   );
 }

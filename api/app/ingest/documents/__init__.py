@@ -1,4 +1,4 @@
-"""Non-Slack document text/table extraction (PDF, DOCX, XLSX, CSV)."""
+"""Non-Slack document text/table extraction (PDF, DOCX, XLSX, CSV, MD, TXT)."""
 
 from api.app.ingest.documents.docx import extract_docx
 from api.app.ingest.documents.extract import (
@@ -14,6 +14,7 @@ from api.app.ingest.documents.schema import (
     ExtractedDocument,
 )
 from api.app.ingest.documents.tabular import extract_csv, extract_xlsx
+from api.app.ingest.documents.text import extract_markdown, extract_txt
 
 __all__ = [
     "DocumentFormat",
@@ -25,6 +26,8 @@ __all__ = [
     "extract_csv",
     "extract_document",
     "extract_docx",
+    "extract_markdown",
     "extract_pdf",
+    "extract_txt",
     "extract_xlsx",
 ]

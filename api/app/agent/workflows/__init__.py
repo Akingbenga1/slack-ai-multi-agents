@@ -1,7 +1,6 @@
 """Workflow Strategy registry (Sprint 25).
 
-Registration point for classifier rules, metadata, and tool strategies.
-See ``registry.py`` module docstring for how to add a workflow.
+Classification removed — the orchestrator LLM decides workflow type.
 """
 
 from __future__ import annotations
@@ -18,11 +17,6 @@ from api.app.agent.workflows.registry import (
     iter_workflow_meta,
     list_workflow_names,
 )
-from api.app.agent.workflows.rules import (
-    CLASSIFIER_RULES,
-    ClassifierRule,
-    classify_workflow,
-)
 from api.app.agent.workflows.tool_strategies import (
     TOOL_STRATEGIES,
     ToolStrategy,
@@ -30,13 +24,10 @@ from api.app.agent.workflows.tool_strategies import (
 )
 
 __all__ = [
-    "CLASSIFIER_RULES",
     "TOOL_STRATEGIES",
     "WORKFLOW_REGISTRY",
-    "ClassifierRule",
     "ToolStrategy",
     "WorkflowMeta",
-    "classify_workflow",
     "get_tool_strategy",
     "get_workflow_meta",
     "iter_workflow_meta",

@@ -96,7 +96,7 @@ export function SyncStatusPanel({ accessToken, tenantId }: Props) {
         </button>
       </div>
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}
@@ -108,7 +108,7 @@ export function SyncStatusPanel({ accessToken, tenantId }: Props) {
       {data === undefined ? (
         <p style={{ margin: 0 }}>Loading sync status…</p>
       ) : data === null ? (
-        <p style={{ margin: 0, color: "#555" }}>No sync status available.</p>
+        <p style={{ margin: 0, color: "var(--muted)" }}>No sync status available.</p>
       ) : (
         <>
           {!data.slack_connected ? (

@@ -12,7 +12,6 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.app.agent.nodes.route import classify_workflow
 from api.app.agent.prompts import system_prompt_for
 from api.app.db.models import Tenant, WorkflowTemplate
 from api.app.slack.workflow_actions import (
@@ -53,50 +52,6 @@ def tenant(db: Session) -> Tenant:
     db.add(t)
     db.commit()
     return t
-
-
-def test_classify_workflow_library_intents():
-    assert (
-        classify_workflow("Store this workflow file in the shared library")
-        == "workflow_store"
-    )
-    assert classify_workflow("Save this for colleagues to copy") == "workflow_store"
-    assert classify_workflow("List shared workflows") == "workflow_list"
-    assert classify_workflow("Show workflows in the library") == "workflow_list"
-    assert (
-        classify_workflow("Copy workflow 11111111-1111-1111-1111-111111111111")
-        == "workflow_copy"
-    )
-    assert classify_workflow("Update my draft title to New Name") == "workflow_edit"
-    assert (
-        classify_workflow("Advise how we can make this workflow work")
-        == "workflow_advise"
-    )
-    assert (
-        classify_workflow("How can we operationalise this workflow?")
-        == "workflow_advise"
-    )
-    assert classify_workflow("advise on this attached workflow") == "workflow_advise"
-
-
-def test_workflow_advise_beats_file_analyse():
-    assert (
-        classify_workflow(
-            "Advise how to make this workflow work from the attached file",
-            has_attachments=True,
-        )
-        == "workflow_advise"
-    )
-
-
-def test_workflow_store_beats_file_analyse():
-    assert (
-        classify_workflow(
-            "Store this attached workflow description for the team",
-            has_attachments=True,
-        )
-        == "workflow_store"
-    )
 
 
 def test_prompts_exist():

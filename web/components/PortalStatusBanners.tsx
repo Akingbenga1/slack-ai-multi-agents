@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import panel from "@/components/dashboard/panel.module.css";
 import { apiClient } from "@/lib/api";
 
 type Props = {
@@ -32,10 +33,10 @@ type SyncStatus = {
   last_success: { finished_at?: string | null } | null;
 };
 
-const TONE_STYLE: Record<Banner["tone"], { bg: string; border: string }> = {
-  warn: { bg: "#fff7ed", border: "#fdba74" },
-  error: { bg: "#fef2f2", border: "#fca5a5" },
-  info: { bg: "#f5f5f5", border: "#d4d4d4" },
+const TONE_CLASS: Record<Banner["tone"], string> = {
+  warn: panel.warnBanner,
+  error: panel.error,
+  info: panel.infoBanner,
 };
 
 export function PortalStatusBanners({ accessToken, tenantId }: Props) {
@@ -136,25 +137,13 @@ export function PortalStatusBanners({ accessToken, tenantId }: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.25rem" }}>
-      {banners.map((b) => {
-        const tone = TONE_STYLE[b.tone];
-        return (
-          <div
-            key={b.key}
-            role="status"
-            style={{
-              padding: "0.75rem 1rem",
-              background: tone.bg,
-              border: `1px solid ${tone.border}`,
-              borderRadius: 4,
-            }}
-          >
-            <p style={{ margin: "0 0 0.25rem", fontWeight: 600 }}>{b.title}</p>
-            <p style={{ margin: "0 0 0.5rem", color: "#444" }}>{b.body}</p>
-            <Link href={b.href}>{b.linkLabel}</Link>
-          </div>
-        );
-      })}
+      {banners.map((b) => (
+        <div key={b.key} role="status" className={TONE_CLASS[b.tone]}>
+          <p style={{ margin: "0 0 0.25rem", fontWeight: 600 }}>{b.title}</p>
+          <p style={{ margin: "0 0 0.5rem", color: "var(--muted)" }}>{b.body}</p>
+          <Link href={b.href}>{b.linkLabel}</Link>
+        </div>
+      ))}
     </div>
   );
 }

@@ -20,7 +20,7 @@ Tenant also from JWT membership or `X-Client-Id` (cross-tenant denied for org us
 
 | `file_role` | Extensions |
 | ----------- | ---------- |
-| `document` | `.pdf` `.docx` `.xlsx` `.csv` |
+| `document` | `.pdf` `.docx` `.xlsx` `.csv` `.md` `.txt` |
 | `slack_history` | `.zip` `.json` `.ndjson` `.csv` `.xlsx` |
 
 Files are stored via ``BlobStore`` (`BLOB_STORE=local` demo default). The local adapter keeps blobs under `{UPLOAD_DIR}/{client_id}/{upload_id}_{filename}` (default `data/uploads/`). DB fields such as `relative_path` / `storage_relative_path` are **blob keys**, not absolute filesystem paths.
@@ -37,6 +37,27 @@ curl -sS -X POST "$API/uploads" \
 Response includes `upload_id`, `relative_path`, `status` (`queued` when ingest is enqueued; `stored` if `enqueue=false`), and `task_id` / `queue` when queued.
 
 Optional form fields: `channel` (Slack history channel override), `enqueue` (default true).
+
+## Dry-run ingest (sync, no Slack / no Celery)
+
+`POST /ingestion/dry-run` (Bearer JWT required)
+
+Same multipart fields as `POST /uploads` (`file`, `file_role`, optional `tenant_id`, `channel`), but:
+
+1. Stores the blob under the tenant
+2. Calls `ingest_upload` **in-process** (parse → chunk → TEI → Qdrant)
+3. Returns counts / sample point ids immediately
+
+Does **not** enqueue Celery and does **not** use the Slack sync or reply pipeline. Requires `ingest` entitlement and a jobs budget unit (same as queued upload).
+
+```bash
+curl -sS -X POST "$API/ingestion/dry-run" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file_role=document" \
+  -F "file=@./policy.csv;type=text/csv"
+```
+
+Response includes `upload_id`, `relative_path`, `status=ingested`, `unit_or_message_count`, `chunk_count`, `point_count`, `point_ids` (capped), and a `result` dict from `UploadIngestResult.as_dict()`.
 
 ## Settings
 

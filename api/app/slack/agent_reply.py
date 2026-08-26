@@ -2,8 +2,7 @@
 
 Sprint 26: orchestration delegates to ``reply_pipeline`` (Gate → Intake →
 RunAgent → Deliver). Entitlement helpers remain here for routes/tests.
-Agent invoke goes through ``run_agent`` / ``AgentRuntime`` (Sprint 39) — no
-LangGraph types in this module.
+Agent invoke goes through ``plan_and_execute`` (orchestrator → executor).
 """
 
 from __future__ import annotations
@@ -44,11 +43,6 @@ MSG_NO_BUDGET = (
     "Your organisation has no token budget configured, so I can't answer right now. "
     "Ask an admin to check the plan in the org portal."
 )
-
-WORKFLOW_LIBRARY_WORKFLOWS = frozenset(
-    {"workflow_store", "workflow_list", "workflow_copy", "workflow_edit"}
-)
-
 
 def entitlement_slack_message(decision: BudgetDecision) -> str:
     """Clear Slack copy when plan/budget blocks the agent."""
@@ -136,7 +130,6 @@ def process_agent_reply(
     team_id: str | None = None,
     settings: Settings | None = None,
     db_factory: Optional[Callable[[], Session]] = None,
-    run_agent_fn: Optional[Callable[..., dict[str, Any]]] = None,
     post_fn: Optional[Callable[..., dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """
@@ -151,7 +144,6 @@ def process_agent_reply(
         team_id=team_id,
         settings=settings,
         db_factory=db_factory,
-        run_agent_fn=run_agent_fn,
         post_fn=post_fn,
         check_agent_entitlement=check_agent_entitlement,
         check_file_job_entitlement=check_file_job_entitlement,

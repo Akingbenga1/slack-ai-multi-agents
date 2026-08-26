@@ -9,6 +9,7 @@ from api.app.ingest.documents.docx import extract_docx
 from api.app.ingest.documents.pdf import extract_pdf
 from api.app.ingest.documents.schema import DocumentFormat, ExtractedDocument
 from api.app.ingest.documents.tabular import extract_csv, extract_xlsx
+from api.app.ingest.documents.text import extract_markdown, extract_txt
 
 
 def _filename_from_source(source: object, filename: str | None) -> str | None:
@@ -26,6 +27,10 @@ _EXT_TO_FORMAT: dict[str, DocumentFormat] = {
     ".docx": DocumentFormat.DOCX,
     ".xlsx": DocumentFormat.XLSX,
     ".csv": DocumentFormat.CSV,
+    ".md": DocumentFormat.MD,
+    ".markdown": DocumentFormat.MD,
+    ".txt": DocumentFormat.TXT,
+    ".text": DocumentFormat.TXT,
 }
 
 _MIME_TO_FORMAT: dict[str, DocumentFormat] = {
@@ -34,6 +39,9 @@ _MIME_TO_FORMAT: dict[str, DocumentFormat] = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": DocumentFormat.XLSX,
     "text/csv": DocumentFormat.CSV,
     "application/csv": DocumentFormat.CSV,
+    "text/markdown": DocumentFormat.MD,
+    "text/x-markdown": DocumentFormat.MD,
+    "text/plain": DocumentFormat.TXT,
 }
 
 
@@ -61,6 +69,14 @@ def detect_document_format(
     if content_type:
         mime = content_type.split(";", 1)[0].strip().lower()
         if mime in _MIME_TO_FORMAT:
+            name = normalize_filename(filename)
+            ext = Path(name).suffix.lower() if name else ""
+            # Prefer markdown when extension is md but MIME is generic text/plain.
+            if (
+                _MIME_TO_FORMAT[mime] is DocumentFormat.TXT
+                and ext in {".md", ".markdown"}
+            ):
+                return DocumentFormat.MD
             return _MIME_TO_FORMAT[mime]
 
     name = normalize_filename(filename)
@@ -71,7 +87,7 @@ def detect_document_format(
 
     raise UnsupportedDocumentFormatError(
         "Could not detect document format; pass format= or a filename "
-        "with extension .pdf / .docx / .xlsx / .csv"
+        "with extension .pdf / .docx / .xlsx / .csv / .md / .txt"
     )
 
 
@@ -83,10 +99,10 @@ def extract_document(
     format: DocumentFormat | str | None = None,
 ) -> ExtractedDocument:
     """
-    Extract text/table units from a PDF, DOCX, XLSX, or CSV document.
+    Extract text/table units from a PDF, DOCX, XLSX, CSV, Markdown, or text file.
 
-    This is for ``file_role=document`` uploads — Slack history dumps use the
-    message parsers under ``api.app.ingest.parsers``.
+    This is for ``file_role=document`` / ``workflow`` uploads — Slack history
+    dumps use the message parsers under ``api.app.ingest.parsers``.
     """
     name = _filename_from_source(source, filename)
     resolved = detect_document_format(
@@ -103,5 +119,9 @@ def extract_document(
         return extract_xlsx(source, filename=name)  # type: ignore[arg-type]
     if resolved is DocumentFormat.CSV:
         return extract_csv(source, filename=name)
+    if resolved is DocumentFormat.MD:
+        return extract_markdown(source, filename=name)  # type: ignore[arg-type]
+    if resolved is DocumentFormat.TXT:
+        return extract_txt(source, filename=name)  # type: ignore[arg-type]
 
     raise UnsupportedDocumentFormatError(f"Unsupported document format: {resolved}")

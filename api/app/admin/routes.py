@@ -249,3 +249,116 @@ def admin_list_audit_logs(
 ) -> dict[str, Any]:
     rows = list_audit_logs(db, tenant_id=tenant_id, limit=limit)
     return {"logs": [_audit_row(r) for r in rows], "count": len(rows)}
+
+
+class AgentTraceBody(BaseModel):
+    tenant_id: UUID = Field(description="Tenant to plan and execute against")
+    question: str = Field(..., min_length=1, max_length=8000)
+
+
+def _llm_runtime_info(settings: Settings) -> dict[str, Any]:
+    provider = (settings.llm_provider or "anthropic").strip().lower()
+    if provider == "anthropic":
+        capable = settings.anthropic_model_sonnet
+        fast = settings.anthropic_model_haiku
+    elif provider == "ollama":
+        capable = settings.ollama_model_capable
+        fast = settings.ollama_model_fast
+    else:
+        capable = "stub-capable"
+        fast = "stub-fast"
+    return {
+        "llm_provider": provider,
+        "orchestrator_model_tier": "capable",
+        "orchestrator_model": capable,
+        "executor_model_tier": "fast",
+        "executor_model": fast,
+    }
+
+
+@router.post("/agent-trace")
+def admin_agent_trace(
+    body: AgentTraceBody,
+    _: Annotated[AuthPrincipal, Depends(require_platform_owner)],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Platform-owner only: run plan→execute and return prompts, steps, answer."""
+    from api.app.agent.facade import plan_and_execute
+    from api.app.db.plan_store import list_agent_plan_steps
+    from api.app.db.session import SessionLocal
+    from api.app.tenant import set_client_id
+
+    tenant_id = str(body.tenant_id)
+    set_client_id(tenant_id)
+    detail = get_tenant_detail(db, body.tenant_id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="tenant not found",
+        )
+
+    try:
+        result = plan_and_execute(
+            client_id=tenant_id,
+            question=body.question,
+            extra={
+                "db_factory": SessionLocal,
+                "include_trace": True,
+                "settings": settings,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"agent_run_failed: {exc}",
+        ) from exc
+
+    plan_id = result.extra.get("plan_id")
+    executed_steps: list[dict[str, Any]] = []
+    if plan_id:
+        # Fresh session: plan/execute commits on its own SessionLocal handles.
+        with SessionLocal() as step_db:
+            for step in list_agent_plan_steps(
+                step_db, tenant_id=tenant_id, plan_id=plan_id
+            ):
+                executed_steps.append(
+                    {
+                        "step_index": step.step_index,
+                        "tool_name": step.tool_name,
+                        "arguments": step.arguments,
+                        "success_criteria": step.success_criteria,
+                        "status": step.status,
+                        "result": step.result,
+                        "error": step.error,
+                    }
+                )
+
+    llm = _llm_runtime_info(settings)
+    return {
+        "tenant_id": tenant_id,
+        "tenant_name": detail.get("name"),
+        "question": body.question,
+        "status": result.status,
+        "phase": result.extra.get("phase"),
+        "workflow": result.extra.get("workflow") or "qa",
+        "plan_id": plan_id,
+        "run_id": result.extra.get("run_id"),
+        "orchestrator_system_prompt": result.extra.get(
+            "orchestrator_system_prompt"
+        ),
+        "orchestrator_user_prompt": result.extra.get(
+            "orchestrator_user_prompt"
+        ),
+        "plan_steps": result.extra.get("plan_steps") or [],
+        "executed_steps": executed_steps,
+        "planner_model": result.extra.get("planner_model")
+        or llm["orchestrator_model"],
+        "final_answer": result.message,
+        "llm": llm,
+    }

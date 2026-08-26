@@ -1,5 +1,8 @@
+import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import panel from "@/components/dashboard/panel.module.css";
 import { AgentSettingsPanel } from "@/components/AgentSettingsPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -8,20 +11,25 @@ export default async function AgentSettingsPage() {
   const tenantId = sessionTenantId(session?.user?.tenantId);
 
   return (
-    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
-      <h1 style={{ marginTop: 0 }}>Agent settings</h1>
-      <p>
-        Manage your AI agent name, instructions, channel allowlist, and job
-        schedules (OR-03 / OR-04).
-      </p>
-      <p>
-        Signed in as {session?.user?.email} ({session?.user?.role}
-        {tenantId ? ` · tenant ${tenantId}` : ""})
-      </p>
-      <AgentSettingsPanel
-        accessToken={session?.accessToken ?? null}
-        tenantId={tenantId}
+    <>
+      <PageHeader
+        title="Agent settings"
+        description="Manage your AI agent name, instructions, channel allowlist, and job schedules."
+        breadcrumbs={[
+          { label: "Overview", href: "/app" },
+          { label: "Agent" },
+        ]}
       />
-    </main>
+      <p className={panel.infoBanner}>
+        Register CLI and MCP tools on the{" "}
+        <Link href="/app/tools">Tools</Link> page.
+      </p>
+      <div className={panel.section}>
+        <AgentSettingsPanel
+          accessToken={session?.accessToken ?? null}
+          tenantId={tenantId}
+        />
+      </div>
+    </>
   );
 }

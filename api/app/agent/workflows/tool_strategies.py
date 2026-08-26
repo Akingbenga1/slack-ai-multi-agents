@@ -24,19 +24,22 @@ from api.app.agent.guardrails import (
 from api.app.agent.mcp_client import (
     McpCallTool,
     citation_from_mcp_hit,
-    draft_meeting_agenda_via_mcp,
-    draft_meeting_brief_via_mcp,
-    draft_meeting_notes_via_mcp,
-    draft_report_via_mcp,
-    search_knowledge_via_mcp,
-    start_onboarding_via_mcp,
+    invoke_mcp,
+    knowledge_result_from_mcp,
 )
-from api.app.agent.nodes.retrieve import SearchFn
+from api.app.retrieval.types import KnowledgeSearchResult
+
+SearchFn = Callable[..., KnowledgeSearchResult]
 from api.app.agent.state import AgentState, WorkflowName
 from api.app.logging_config import get_logger
 from api.app.settings import Settings
 from api.app.slack.attachments import evidence_to_chunks
-from mcp_server.tools.onboarding import ONBOARDING_NOT_CONFIGURED_MESSAGE
+
+ONBOARDING_NOT_CONFIGURED_MESSAGE = (
+    "Client onboarding is not configured for this workspace yet. "
+    "A guided checklist process will be added in a later phase — "
+    "there is no onboarding workflow to start today."
+)
 
 logger = get_logger("api.agent.workflows.tool_strategies")
 
@@ -80,19 +83,7 @@ class OnboardingToolStrategy:
 
     def run(self, state: AgentState, ctx: ToolsContext) -> dict[str, Any]:
         client_id = require_tenant_client_id(state.get("client_id"), where="tools")
-        if ctx.search is None:
-            payload = start_onboarding_via_mcp(
-                client_id=client_id,
-                settings=ctx.settings,
-                call_tool=ctx.mcp_call_tool,
-            )
-            message = str(
-                payload.get("message")
-                or payload.get("markdown")
-                or ONBOARDING_NOT_CONFIGURED_MESSAGE
-            ).strip()
-        else:
-            message = ONBOARDING_NOT_CONFIGURED_MESSAGE
+        message = ONBOARDING_NOT_CONFIGURED_MESSAGE
         logger.info(
             "agent_tools client_id=%s via=%s workflow=%s configured=false",
             client_id,
@@ -128,14 +119,17 @@ class RagToolStrategy:
                 settings=ctx.settings,
             )
         else:
-            result = search_knowledge_via_mcp(
-                client_id=client_id,
-                query=question,
-                limit=ctx.limit,
-                score_threshold=min_score,
+            args: dict[str, Any] = {
+                "client_id": client_id,
+                "query": question,
+                "limit": ctx.limit,
+            }
+            payload = invoke_mcp(
+                "search_knowledge", args,
                 settings=ctx.settings,
                 call_tool=ctx.mcp_call_tool,
             )
+            result = knowledge_result_from_mcp(payload)
 
         raw = [citation_to_chunk(h) for h in result.hits]
         rag_chunks = filter_chunks_for_tenant(raw, client_id, min_score=min_score)
@@ -184,12 +178,17 @@ class ReportToolStrategy:
         window = (state.get("report_window") or "").strip() or question
         channel = (state.get("report_channel") or "").strip() or None
         min_score = float(ctx.settings.agent_min_score)
-        draft = draft_report_via_mcp(
-            client_id=client_id,
-            window_label=window,
-            topic=question,
-            channel=channel,
-            limit=ctx.limit,
+        report_args: dict[str, Any] = {
+            "client_id": client_id,
+            "window_label": window,
+            "limit": ctx.limit,
+        }
+        if question:
+            report_args["topic"] = question
+        if channel:
+            report_args["channel"] = channel
+        draft = invoke_mcp(
+            "draft_report", report_args,
             settings=ctx.settings,
             call_tool=ctx.mcp_call_tool,
         )
@@ -326,17 +325,37 @@ class DirectRetrieveStrategy:
 _RAG = RagToolStrategy()
 _RAG_ATTACH = RagToolStrategy(hedge_without_attachments=True)
 
+def _mcp_draft_fn(tool_name: str) -> MeetingDraftFn:
+    """Return a draft callable that delegates to invoke_mcp for a named tool."""
+    def _draft(
+        *,
+        client_id: str,
+        topic: str,
+        limit: int = 8,
+        settings: Settings | None = None,
+        call_tool: McpCallTool | None = None,
+        **_kw: Any,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {
+            "client_id": client_id,
+            "topic": topic,
+            "limit": int(limit),
+        }
+        return invoke_mcp(tool_name, args, settings=settings, call_tool=call_tool)
+    return _draft
+
+
 TOOL_STRATEGIES: dict[str, ToolStrategy] = {
     "onboarding": OnboardingToolStrategy(),
     "report": ReportToolStrategy(_RAG),
     "meeting_brief": MeetingDraftToolStrategy(
-        "meeting_brief", draft_meeting_brief_via_mcp, _RAG
+        "meeting_brief", _mcp_draft_fn("draft_meeting_brief"), _RAG
     ),
     "meeting_agenda": MeetingDraftToolStrategy(
-        "meeting_agenda", draft_meeting_agenda_via_mcp, _RAG
+        "meeting_agenda", _mcp_draft_fn("draft_meeting_agenda"), _RAG
     ),
     "meeting_notes": MeetingDraftToolStrategy(
-        "meeting_notes", draft_meeting_notes_via_mcp, _RAG
+        "meeting_notes", _mcp_draft_fn("draft_meeting_notes"), _RAG
     ),
     "file_analyse": _RAG_ATTACH,
     "file_pdf_export": _RAG_ATTACH,

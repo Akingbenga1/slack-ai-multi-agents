@@ -181,12 +181,12 @@ export function BillingActions({
                 : ""}
             </p>
             {waitingForWebhook ? (
-              <p style={{ margin: "0 0 0.35rem", color: "#555" }}>
+              <p style={{ margin: "0 0 0.35rem", color: "var(--muted)" }}>
                 Waiting for payment confirmation to activate the plan…
               </p>
             ) : null}
             {!planActive && !waitingForWebhook ? (
-              <p style={{ margin: "0 0 0.35rem", color: "#555" }}>
+              <p style={{ margin: "0 0 0.35rem", color: "var(--muted)" }}>
                 Agent features stay off until the organisation plan is active.
                 Pay below, or manage your subscription if you already have a
                 billing customer.
@@ -223,11 +223,11 @@ export function BillingActions({
         </button>
       </div>
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}
-      <p style={{ color: "#555", margin: 0, fontSize: "0.9rem" }}>
+      <p style={{ color: "var(--muted)", margin: 0, fontSize: "0.9rem" }}>
         Requires payment provider keys in the API <code>.env</code>. See{" "}
         <code>docs/billing.md</code>.
         {stripeAdapter ? (

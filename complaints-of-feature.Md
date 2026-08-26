@@ -1,0 +1,8 @@
+- Yes, it can make sense for local dry-run testing, but prefer passing a blob key + filename, not only an absolute path.
+- Absolute paths break if storage is not local disk (e.g. S3) or if the API and CLI cwd differ.
+- How it would work: dry-run accepts a file (or `upload_id`), stores/resolves it, then passes `attachments` with `filename` + `storage_relative_path` (and optional resolved local path) into `plan_and_execute`.
+- The orchestrator sees attachment metadata and should not set a failing `requires_attachment` halt.
+- Before CLI runs, the executor/CLI layer should resolve that key via BlobStore into a real path and put it in `args_list`.
+- That can successfully enable **CLI** tools to open the file, if `pdftotext` (etc.) is installed and given that resolved path.
+- **MCP** only works if that server accepts a local path or you upload/send file bytes/URL to it; many MCP PDF tools will not auto-read your disk path.
+- So: dry-run upload + attachment metadata helps a lot for CLI; MCP still needs an explicit file handoff the server supports.

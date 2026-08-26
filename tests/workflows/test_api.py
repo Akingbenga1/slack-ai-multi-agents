@@ -123,3 +123,97 @@ def test_list_and_copy_isolated(client: TestClient, db: Session, tmp_path: Path)
     assert body["visibility"] == "personal"
     assert body["parent_id"] == str(stored.template.id)
     assert body["title"] == "My A draft"
+
+
+def test_upload_workflow_template(client: TestClient, db: Session, tmp_path: Path):
+    tenant = Tenant(id=uuid4(), slug="up", name="Upload Org", status="active")
+    db.add(tenant)
+    db.commit()
+
+    headers = {
+        "Authorization": f"Bearer {_token(str(tenant.id))}",
+        "X-Client-Id": str(tenant.id),
+    }
+    res = client.post(
+        "/workflows/upload",
+        headers=headers,
+        files={"file": ("user-workflow.md", b"# Steps\n1. Read file\n", "text/markdown")},
+        data={"title": "User workflow"},
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["created"] is True
+    assert body["ingested_queued"] is False
+    assert body["ingest_task_id"] is None
+    assert body["title"] == "User workflow"
+    assert body["visibility"] == "shared"
+    assert body["original_filename"] == "user-workflow.md"
+    assert "Read file" in (body["body_text_preview"] or "")
+
+    res_list = client.get("/workflows", headers=headers)
+    assert len(res_list.json()["templates"]) == 1
+
+
+def test_upload_workflow_idempotent(client: TestClient, db: Session, tmp_path: Path):
+    tenant = Tenant(id=uuid4(), slug="idem", name="Idem Org", status="active")
+    db.add(tenant)
+    db.commit()
+    headers = {
+        "Authorization": f"Bearer {_token(str(tenant.id))}",
+        "X-Client-Id": str(tenant.id),
+    }
+    payload = b"same bytes"
+    first = client.post(
+        "/workflows/upload",
+        headers=headers,
+        files={"file": ("flow.md", payload, "text/markdown")},
+    )
+    second = client.post(
+        "/workflows/upload",
+        headers=headers,
+        files={"file": ("flow-copy.md", payload, "text/markdown")},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert first.json()["created"] is True
+    assert second.json()["created"] is False
+
+
+def test_upload_workflow_rejects_bad_extension(client: TestClient, db: Session):
+    tenant = Tenant(id=uuid4(), slug="bad", name="Bad Org", status="active")
+    db.add(tenant)
+    db.commit()
+    headers = {
+        "Authorization": f"Bearer {_token(str(tenant.id))}",
+        "X-Client-Id": str(tenant.id),
+    }
+    res = client.post(
+        "/workflows/upload",
+        headers=headers,
+        files={"file": ("virus.exe", b"bad", "application/octet-stream")},
+    )
+    assert res.status_code == 400
+    assert "not allowed" in res.json()["detail"].lower()
+
+
+def test_upload_workflow_tenant_isolated(client: TestClient, db: Session):
+    a = Tenant(id=uuid4(), slug="ua", name="A", status="active")
+    b = Tenant(id=uuid4(), slug="ub", name="B", status="active")
+    db.add_all([a, b])
+    db.commit()
+    headers_a = {
+        "Authorization": f"Bearer {_token(str(a.id))}",
+        "X-Client-Id": str(a.id),
+    }
+    headers_b = {
+        "Authorization": f"Bearer {_token(str(b.id))}",
+        "X-Client-Id": str(b.id),
+    }
+    res = client.post(
+        "/workflows/upload",
+        headers=headers_a,
+        files={"file": ("only-a.md", b"tenant a", "text/markdown")},
+    )
+    assert res.status_code == 201
+    assert client.get("/workflows", headers=headers_b).json()["templates"] == []

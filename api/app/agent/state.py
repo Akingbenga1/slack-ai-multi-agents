@@ -8,30 +8,9 @@ from langgraph.graph.message import add_messages
 
 # Vendor-neutral tiers — adapters map to concrete model ids (Sprint 33)
 ModelTier = Literal["fast", "capable"]
-WorkflowName = Literal[
-    "qa",
-    "summarize",
-    "status",
-    "meeting_brief",
-    "meeting_agenda",
-    "meeting_notes",
-    "report",
-    "onboarding",
-    "file_analyse",
-    "file_pdf_export",
-    "file_rename",
-    "workflow_store",
-    "workflow_list",
-    "workflow_copy",
-    "workflow_edit",
-    "workflow_advise",
-    "unknown",
-]
 
-# Heavy Slack file jobs — budget-gated before graph (Sprint 23.2 / 24.2)
-FILE_HEAVY_WORKFLOWS: frozenset[WorkflowName] = frozenset(
-    {"file_pdf_export", "file_rename", "workflow_store"}
-)
+# Workflow name is now a free-form string decided by the orchestrator LLM.
+WorkflowName = str
 
 
 class AgentState(TypedDict):
@@ -40,7 +19,7 @@ class AgentState(TypedDict):
     client_id: str
     messages: Annotated[list, add_messages]
     retrieved_chunks: list[dict[str, Any]]
-    workflow: WorkflowName
+    workflow: str
     model_tier: ModelTier
     complexity_flags: NotRequired[list[str]]
     # Last user question text (convenience for retrieve/compose)

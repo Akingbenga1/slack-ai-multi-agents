@@ -3,12 +3,16 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.app.agent.cli_host_routes import router as cli_host_router
+from api.app.agent.mcp_host_routes import router as mcp_host_router
 from api.app.agent.routes import router as agent_router
+from api.app.agent.tool_routes import router as tools_router
 from api.app.admin.routes import router as admin_router
 from api.app.auth.deps import get_current_principal
 from api.app.auth.routes import router as auth_router
 from api.app.auth.tokens import AuthPrincipal
 from api.app.billing.routes import router as billing_router
+from api.app.discovery.routes import router as discovery_router
 from api.app.governance.routes import router as usage_router
 from api.app.health import run_deep_health
 from api.app.jobs.routes import router as jobs_router
@@ -18,6 +22,7 @@ from api.app.security import cors_allow_origins, validate_security_settings
 from api.app.settings import Settings, get_settings
 from api.app.slack.routes import router as slack_router
 from api.app.tenant import get_client_id
+from api.app.ingestion.routes import router as ingestion_router
 from api.app.uploads.routes import router as uploads_router
 from api.app.workflows.routes import router as workflows_router
 
@@ -50,9 +55,14 @@ app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(usage_router)
 app.include_router(agent_router)
+app.include_router(cli_host_router)
+app.include_router(mcp_host_router)
+app.include_router(tools_router)
+app.include_router(discovery_router)
 app.include_router(jobs_router)
 app.include_router(slack_router)
 app.include_router(uploads_router)
+app.include_router(ingestion_router)
 app.include_router(workflows_router)
 
 

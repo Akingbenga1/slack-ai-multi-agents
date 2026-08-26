@@ -11,7 +11,7 @@ const LINK_STYLE: CSSProperties = {
 const NAV_STYLE: CSSProperties = {
   marginBottom: "1.5rem",
   paddingBottom: "1rem",
-  borderBottom: "1px solid #e5e5e5",
+  borderBottom: "1px solid var(--nav-border)",
   fontSize: "0.95rem",
 };
 

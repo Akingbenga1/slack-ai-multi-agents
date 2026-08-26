@@ -58,6 +58,13 @@ def build_beat_schedule(settings: Settings) -> dict[str, Any]:
                 "queue": QUEUE_DEFAULT,
             },
         },
+        "tldr-cli-db-refresh": {
+            "task": "worker.refresh_tldr_cli_db",
+            "schedule": float(settings.discovery_cli_update_interval_seconds),
+            "options": {
+                "queue": QUEUE_LOW,
+            },
+        },
     }
 
 

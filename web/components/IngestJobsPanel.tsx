@@ -66,14 +66,14 @@ export function IngestJobsPanel({ accessToken, tenantId, refreshKey = 0 }: Props
         </button>
       </div>
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}
       {jobs === undefined ? (
         <p style={{ margin: 0 }}>Loading ingest jobs…</p>
       ) : jobs === null || jobs.length === 0 ? (
-        <p style={{ margin: 0, color: "#555" }}>
+        <p style={{ margin: 0, color: "var(--muted)" }}>
           No ingest jobs yet. Upload a document or Slack history dump above.
         </p>
       ) : (
@@ -92,7 +92,7 @@ export function IngestJobsPanel({ accessToken, tenantId, refreshKey = 0 }: Props
                 <td style={{ padding: "0.35rem" }}>
                   {j.status}
                   {j.error ? (
-                    <span style={{ color: "#b00020", display: "block", fontSize: "0.8rem" }}>
+                    <span style={{ color: "var(--error)", display: "block", fontSize: "0.8rem" }}>
                       {j.error}
                     </span>
                   ) : null}

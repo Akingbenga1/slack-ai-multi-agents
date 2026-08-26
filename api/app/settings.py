@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     anthropic_model_haiku: str = "claude-3-5-haiku-latest"
     anthropic_model_sonnet: str = "claude-sonnet-4-20250514"
     anthropic_max_tokens: int = 1024
+    orchestrator_max_tokens: int = 4096
+    # Tool RAG — planner shortlist size (clamped 5–20 in tool_rag)
+    tool_rag_top_k: int = 12
+    tool_rag_use_embeddings: bool = True
+    tool_rag_workflow_body_chars: int = 1500
     # Ollama / OpenAI-compatible adapter (base URL + tier tags)
     ollama_url: str = "http://localhost:11434"
     ollama_model_fast: str = "llama3.2"
@@ -120,6 +125,38 @@ class Settings(BaseSettings):
     # When false, Redis errors deny requests instead of failing open
     rate_limit_fail_open: bool = True
 
+    # Sprint 46 — plan-and-execute facade behind feature flag
+    plan_execute_enabled: bool = False
+
+    # Executor agent LLM loop (Sprint 48)
+    executor_max_tool_rounds: int = 10
+
+    # CLI tool execution (Sprint 47)
+    cli_tools_enabled: bool = True
+    cli_tools_timeout_seconds: int = 120
+    cli_tools_max_output_bytes: int = 1_000_000
+    # Host CLI check/install control plane (not used by orchestrator/executor)
+    cli_host_install_enabled: bool = True
+    cli_host_install_timeout_seconds: int = 300
+    mcp_host_check_timeout_seconds: float = 20.0
+
+    # System-wide tool discovery (not tenant-scoped)
+    # CLI: portable tldr SQLite DB (relative paths resolve from project root)
+    discovery_cli_db_path: str = "tldr_pages.db"
+    discovery_cli_search_limit: int = 15
+    # Celery Beat interval for upstream tldr → SQLite refresh (default weekly)
+    discovery_cli_update_interval_seconds: float = 604800.0
+    # Deprecated / unused for CLI (kept so old .env keys do not break Settings)
+    discovery_cli_service_url: str = ""
+    # Official MCP Registry base URL — set via DISCOVERY_MCP_SERVICE_URL (no code default)
+    discovery_mcp_service_url: str = ""
+    # Reserved for a future HTTP-tools discovery route
+    discovery_http_service_url: str = ""
+    discovery_timeout_seconds: float = 45.0
+    discovery_mcp_search_limit: int = 10
+    discovery_mcp_cache_ttl_seconds: float = 300.0
+
+
     # Demo seed hardening (Sprint 22.1) — laptop demo without live Stripe/OAuth
     demo_activate_plan: bool = False
     demo_slack_team_id: str = ""
@@ -140,6 +177,17 @@ class Settings(BaseSettings):
         from pathlib import Path
 
         return Path(self.upload_dir)
+
+    @property
+    def discovery_cli_db_path_resolved(self):
+        """Absolute path to the portable tldr CLI discovery SQLite file."""
+        from pathlib import Path
+
+        path = Path(self.discovery_cli_db_path)
+        if path.is_absolute():
+            return path
+        # api/app/settings.py → project root is parents[2]
+        return Path(__file__).resolve().parents[2] / path
 
 
 @lru_cache

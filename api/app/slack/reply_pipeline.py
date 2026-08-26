@@ -13,9 +13,6 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from api.app.agent.run import run_agent
-from api.app.agent.state import FILE_HEAVY_WORKFLOWS
-from api.app.agent.workflows import classify_workflow
 from api.app.governance.usage import EVENT_FILE_JOB, record_usage
 from api.app.logging_config import get_logger
 from api.app.settings import Settings, get_settings
@@ -27,16 +24,11 @@ from api.app.slack.echo import (
     reply_thread_ts,
 )
 from api.app.slack.files import files_from_event, intake_attachments
-from api.app.slack.workflow_actions import (
-    MSG_ADVICE_NO_EVIDENCE,
-    enrich_evidence_for_advice,
-)
 from api.app.tenant import set_client_id
 
 logger = get_logger("api.slack.reply_pipeline")
 
 PostFn = Callable[..., dict[str, Any]]
-RunAgentFn = Callable[..., dict[str, Any]]
 DbFactory = Callable[[], Session]
 
 
@@ -50,13 +42,11 @@ class ReplyPipelineContext:
     team_id: str | None
     settings: Settings
     db_factory: DbFactory
-    invoke: RunAgentFn
     post: PostFn
     channel: str
     question: str
     conversation_id: str
     thread_ts: str | None
-    pre_workflow: str
     has_file_refs: bool
     db: Session | None = None
     upload_root: Path | None = None
@@ -66,7 +56,6 @@ class ReplyPipelineContext:
     agent_result: dict[str, Any] | None = None
     answer: str = ""
     early_return: dict[str, Any] | None = None
-    skip_agent: bool = False
 
 
 def stage_gate(
@@ -94,13 +83,12 @@ def stage_gate(
         return ctx
 
     # Gate any attachment intake/download path, not only PDF/rename/store.
-    if ctx.pre_workflow in FILE_HEAVY_WORKFLOWS or ctx.has_file_refs:
+    if ctx.has_file_refs:
         ok_job, job_denial = check_file_job_entitlement(ctx.db, ctx.tenant_id)
         if not ok_job:
             logger.info(
-                "slack_file_job_denied tenant_id=%s workflow=%s has_files=%s",
+                "slack_file_job_denied tenant_id=%s has_files=%s",
                 ctx.tenant_id,
-                ctx.pre_workflow,
                 ctx.has_file_refs,
             )
             ctx.post(
@@ -113,7 +101,6 @@ def stage_gate(
                 "ok": True,
                 "denied": True,
                 "reason": job_denial,
-                "workflow": ctx.pre_workflow,
             }
             return ctx
 
@@ -134,7 +121,6 @@ def stage_gate(
             "ok": True,
             "denied": True,
             "reason": allow_denial,
-            "workflow": ctx.pre_workflow,
         }
     return ctx
 
@@ -199,54 +185,40 @@ def stage_intake(ctx: ReplyPipelineContext) -> ReplyPipelineContext:
 
 
 def stage_run_agent(ctx: ReplyPipelineContext) -> ReplyPipelineContext:
-    """Invoke ``run_agent`` (or skip for library_confirm; enrich for advise)."""
+    """Send request to the orchestrator → executor via plan_and_execute."""
     assert ctx.db is not None
-    meta = None
-    try:
-        from api.app.agent.workflows.registry import get_workflow_meta
 
-        meta = get_workflow_meta(ctx.pre_workflow)
-    except Exception:
-        meta = None
+    from api.app.agent.facade import plan_and_execute
 
-    if meta is not None and meta.delivery_hint == "library_confirm":
-        ctx.skip_agent = True
-        return ctx
-
-    if ctx.pre_workflow == "workflow_advise":
-        enriched = enrich_evidence_for_advice(
-            db=ctx.db,
-            client_id=str(ctx.tenant_id),
-            question=ctx.question,
-            attached_evidence=ctx.attached_payload,
-            slack_user_id=ctx.slack_user,
-        )
-        if not enriched.get("ok"):
-            ctx.answer = str(enriched.get("confirmation") or MSG_ADVICE_NO_EVIDENCE)
-            ctx.skip_agent = True
-            return ctx
-        ctx.attached_payload = list(enriched.get("evidence") or ctx.attached_payload)
-
-    ctx.agent_result = ctx.invoke(
+    facade_result = plan_and_execute(
         client_id=str(ctx.tenant_id),
         question=ctx.question,
         conversation_id=ctx.conversation_id,
-        settings=ctx.settings,
-        db_factory=ctx.db_factory,
-        record_usage=True,
-        attached_evidence=ctx.attached_payload,
+        attachments=ctx.attached_payload,
+        extra={
+            "db_factory": ctx.db_factory,
+            "channel_lookup": None,
+        },
     )
+    ctx.agent_result = {
+        "answer": facade_result.message,
+        "workflow": facade_result.extra.get("workflow") or "qa",
+        "plan_id": facade_result.extra.get("plan_id"),
+        "run_id": facade_result.extra.get("run_id"),
+        "usage_tokens": 0,
+        "hedge": facade_result.status != "succeeded",
+    }
     return ctx
 
 
 def stage_deliver(ctx: ReplyPipelineContext) -> dict[str, Any]:
-    """Dispatch DeliveryStrategy keyed by workflow / result flags."""
+    """Post the agent result to Slack."""
     assert ctx.db is not None
     assert ctx.upload_root is not None
 
-    workflow = ctx.pre_workflow
+    workflow = "qa"
     if ctx.agent_result:
-        workflow = str(ctx.agent_result.get("workflow") or ctx.pre_workflow)
+        workflow = str(ctx.agent_result.get("workflow") or "qa")
 
     delivery_ctx = DeliveryContext(
         db=ctx.db,
@@ -262,8 +234,6 @@ def stage_deliver(ctx: ReplyPipelineContext) -> dict[str, Any]:
         upload_root=ctx.upload_root,
         db_factory=ctx.db_factory,
         post=ctx.post,
-        invoke=ctx.invoke,
-        pre_workflow=ctx.pre_workflow,
         attached_payload=ctx.attached_payload,
         intake_errors=ctx.intake_errors,
         slack_user=ctx.slack_user,
@@ -271,11 +241,7 @@ def stage_deliver(ctx: ReplyPipelineContext) -> dict[str, Any]:
         workflow=workflow,
         answer=ctx.answer,
     )
-    strategy = get_delivery_strategy(workflow)
-    # Library paths key off pre_workflow even if unused agent_result
-    if ctx.skip_agent and ctx.pre_workflow.startswith("workflow_"):
-        strategy = get_delivery_strategy(ctx.pre_workflow)
-    return strategy.deliver(delivery_ctx)
+    return get_delivery_strategy(workflow).deliver(delivery_ctx)
 
 
 def run_reply_pipeline(
@@ -286,7 +252,6 @@ def run_reply_pipeline(
     team_id: str | None = None,
     settings: Settings | None = None,
     db_factory: Optional[DbFactory] = None,
-    run_agent_fn: Optional[RunAgentFn] = None,
     post_fn: Optional[PostFn] = None,
     check_agent_entitlement: Callable[..., tuple[bool, str]],
     check_file_job_entitlement: Callable[..., tuple[bool, str]],
@@ -301,7 +266,6 @@ def run_reply_pipeline(
 
     settings = settings or get_settings()
     factory = db_factory or session_factory or SessionLocal
-    invoke = run_agent_fn or run_agent
     post = post_fn or post_message
 
     channel = event.get("channel")
@@ -315,7 +279,6 @@ def run_reply_pipeline(
     set_client_id(str(tid))
 
     has_file_refs = bool(files_from_event(event))
-    pre_workflow = classify_workflow(question, has_attachments=has_file_refs)
 
     ctx = ReplyPipelineContext(
         tenant_id=tid,
@@ -324,13 +287,11 @@ def run_reply_pipeline(
         team_id=team_id,
         settings=settings,
         db_factory=factory,
-        invoke=invoke,
         post=post,
         channel=str(channel),
         question=question,
         conversation_id=conversation_id,
         thread_ts=thread_ts,
-        pre_workflow=pre_workflow,
         has_file_refs=has_file_refs,
         upload_root=Path(settings.upload_dir),
     )

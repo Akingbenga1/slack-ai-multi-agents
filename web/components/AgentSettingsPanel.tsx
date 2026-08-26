@@ -173,7 +173,7 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
 
   if (!accessToken) {
     return (
-      <p style={{ color: "#b00020" }} role="status">
+      <p style={{ color: "var(--error)" }} role="status">
         API JWT missing. Start FastAPI, seed demo users, then re-login.
       </p>
     );
@@ -186,7 +186,7 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       {error ? (
-        <p style={{ color: "#b00020", margin: 0 }} role="alert">
+        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
           {error}
         </p>
       ) : null}
@@ -230,7 +230,7 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
             style={{ padding: "0.5rem", fontFamily: "ui-monospace, monospace" }}
           />
         </label>
-        <p style={{ margin: 0, color: "#555", fontSize: "0.85rem" }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.85rem" }}>
           Empty allowlist = no channel restriction stored. Enforcement in Slack
           reply path can tighten later; settings are tenant-scoped today.
         </p>
@@ -294,7 +294,7 @@ export function AgentSettingsPanel({ accessToken, tenantId }: Props) {
       </form>
 
       {data?.updated_at ? (
-        <p style={{ margin: 0, color: "#666", fontSize: "0.85rem" }}>
+        <p style={{ margin: 0, color: "var(--muted-foreground)", fontSize: "0.85rem" }}>
           Config updated at {data.updated_at}
         </p>
       ) : null}

@@ -15,12 +15,14 @@ class FileRole(StrEnum):
 
 
 # Extensions allowed per role (lowercase, with dot)
-DOCUMENT_EXTENSIONS: frozenset[str] = frozenset({".pdf", ".docx", ".xlsx", ".csv"})
+DOCUMENT_EXTENSIONS: frozenset[str] = frozenset(
+    {".pdf", ".docx", ".xlsx", ".csv", ".md", ".txt"}
+)
 SLACK_HISTORY_EXTENSIONS: frozenset[str] = frozenset(
     {".zip", ".json", ".ndjson", ".csv", ".xlsx"}
 )
 WORKFLOW_EXTENSIONS: frozenset[str] = frozenset(
-    {".pdf", ".docx", ".xlsx", ".csv", ".md", ".txt"}
+    {".pdf", ".docx", ".xlsx", ".csv", ".md", ".txt", ".markdown", ".text"}
 )
 
 

@@ -1,22 +1,20 @@
-import { AdminNav } from "@/components/AdminNav";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { AdminDashboardShell } from "@/components/dashboard/AdminDashboardShell";
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const session = await getServerSession(authOptions);
+
   return (
-    <>
-      <div
-        style={{
-          padding: "1.25rem 2rem 0",
-          fontFamily: "system-ui, sans-serif",
-          maxWidth: 960,
-        }}
-      >
-        <AdminNav />
-      </div>
+    <AdminDashboardShell
+      userEmail={session?.user?.email ?? null}
+      userRole={session?.user?.role ?? null}
+    >
       {children}
-    </>
+    </AdminDashboardShell>
   );
 }

@@ -1,5 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import panel from "@/components/dashboard/panel.module.css";
 import { UsageSummaryPanel } from "@/components/UsageSummaryPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -8,19 +10,21 @@ export default async function UsagePage() {
   const tenantId = sessionTenantId(session?.user?.tenantId);
 
   return (
-    <main style={{ padding: "0 2rem 2rem", fontFamily: "system-ui, sans-serif", maxWidth: 720 }}>
-      <h1 style={{ marginTop: 0 }}>Logs &amp; usage</h1>
-      <p>
-        Mentions, jobs, errors, and token usage for your organisation (OR-07).
-      </p>
-      <p>
-        Signed in as {session?.user?.email} ({session?.user?.role}
-        {tenantId ? ` · tenant ${tenantId}` : ""})
-      </p>
-      <UsageSummaryPanel
-        accessToken={session?.accessToken ?? null}
-        tenantId={tenantId}
+    <>
+      <PageHeader
+        title="Logs & usage"
+        description="Mentions, jobs, errors, and token usage for your organisation."
+        breadcrumbs={[
+          { label: "Overview", href: "/app" },
+          { label: "Usage" },
+        ]}
       />
-    </main>
+      <div className={panel.section}>
+        <UsageSummaryPanel
+          accessToken={session?.accessToken ?? null}
+          tenantId={tenantId}
+        />
+      </div>
+    </>
   );
 }

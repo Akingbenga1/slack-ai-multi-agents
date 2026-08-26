@@ -139,12 +139,12 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
         Include personal drafts for copy owner
       </label>
       {items && items.length > 0 ? (
-        <p style={{ margin: 0, fontSize: "0.9rem", color: "#555" }}>
+        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--muted)" }}>
           Showing {counts.shared} shared
           {includePersonal ? ` · ${counts.personal} personal draft(s)` : ""}
         </p>
       ) : null}
-      {error ? <p style={{ color: "#b00020" }}>{error}</p> : null}
+      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
       {note ? <p style={{ color: "#0a5" }}>{note}</p> : null}
       {items === undefined ? <p>Loading…</p> : null}
       {items === null && !error ? <p>Sign in to view workflows.</p> : null}
@@ -158,14 +158,14 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
               key={t.id}
               style={{
                 padding: "0.65rem 0",
-                borderBottom: "1px solid #eee",
+                borderBottom: "1px solid var(--border-subtle)",
                 display: "grid",
                 gap: "0.25rem",
               }}
             >
               <strong>
                 {t.title}{" "}
-                <span style={{ fontWeight: 400, color: "#666" }}>
+                <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>
                   ({t.visibility === "personal" ? "personal draft" : "shared"})
                 </span>
               </strong>
@@ -181,7 +181,7 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
                   : ""}
               </span>
               {t.body_text_preview ? (
-                <span style={{ fontSize: "0.85rem", color: "#666" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--muted-foreground)" }}>
                   Preview: {t.body_text_preview.slice(0, 160)}
                   {t.body_text_preview.length > 160 ? "…" : ""}
                 </span>

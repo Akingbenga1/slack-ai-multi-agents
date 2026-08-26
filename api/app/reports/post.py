@@ -7,7 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from api.app.agent.run import run_report
+from api.app.agent.facade import plan_and_execute
 from api.app.logging_config import get_logger
 from api.app.reports.schedule import (
     claim_recurring_report_period,
@@ -24,7 +24,7 @@ from api.app.slack.sync import sync_slack_history
 logger = get_logger("api.reports.post")
 
 PostMessageFn = Callable[..., dict[str, Any]]
-RunReportFn = Callable[..., dict[str, Any]]
+RunReportFn = Callable[..., dict[str, Any]]  # kept for run_report_fn injection
 SyncFn = Callable[..., Any]
 
 
@@ -122,14 +122,29 @@ def post_recurring_report(
                     exc,
                 )
 
-        runner = run_report_fn or run_report
-        report = runner(
-            client_id=str(tid),
-            window_label=window,
-            channel=channel,
-            record_usage=record_usage,
-            settings=settings,
-        )
+        if run_report_fn is not None:
+            report = run_report_fn(
+                client_id=str(tid),
+                window_label=window,
+                channel=channel,
+                record_usage=record_usage,
+                settings=settings,
+            )
+        else:
+            question = f"Recurring report for {window}"
+            if channel:
+                question = f"{question} (channel {channel})"
+            facade_result = plan_and_execute(
+                client_id=str(tid),
+                question=question,
+            )
+            report = {
+                "answer": facade_result.message,
+                "workflow": facade_result.extra.get("workflow") or "report",
+                "retrieved_chunks": [],
+                "usage_tokens": 0,
+                "hedge": facade_result.status != "succeeded",
+            }
         text = format_slack_reply(
             str(report.get("answer") or ""),
             chunks=report.get("retrieved_chunks"),
