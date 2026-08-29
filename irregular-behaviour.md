@@ -1,0 +1,5 @@
+Step 2 failed because the orchestrator added a redundant second step — “Upload the newly created combined PDF…” — even though step 1’s merge already writes the output into the upload working directory.
+
+When step 2 started, its prompt showed `Prior step results: (none)`, so the executor had no path to the merged file. Step 1 did succeed (`pdfmerge` exit 0 and files like `combined.pdf` on disk), but its result only had empty `stdout` and no `path`/`done_text`, and the prior-results formatter ignores fields like `output_file`, so nothing useful was passed forward.
+
+Blind to step 1’s output, the step 2 LLM called `uvx pypdf`, which failed immediately: `Package pypdf does not provide any executables` (pypdf is a library, not a CLI). That tool error marked step 2 failed, skipped compose, and the API returned `status: "failed"` with `answer: "(empty model response)"` even though the merge likely already worked.
