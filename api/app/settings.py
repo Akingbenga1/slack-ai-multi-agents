@@ -130,6 +130,8 @@ class Settings(BaseSettings):
 
     # Executor agent LLM loop (Sprint 48)
     executor_max_tool_rounds: int = 10
+    # English-goal + real uvx ReAct attempts per plan step
+    executor_uvx_max_attempts: int = 8
 
     # CLI tool execution (Sprint 47)
     cli_tools_enabled: bool = True

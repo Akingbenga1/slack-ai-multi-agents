@@ -1,6 +1,7 @@
 """Generic plan step types, preconditions, and runtime checks (Phase 1).
 
-Reserved step markers (not catalog tools): ``advice``, ``halt``.
+Reserved step markers (not catalog tools): ``advice``, ``halt``,
+``execute_goal`` (English goal for Executor + uvx), ``run_uvx``.
 Step metadata is persisted under ``arguments["_step_meta"]``.
 """
 
@@ -11,11 +12,39 @@ from typing import Any
 
 ADVICE_STEP_TOOL_NAME = "advice"
 HALT_STEP_TOOL_NAME = "halt"
+EXECUTE_GOAL_TOOL_NAME = "execute_goal"
+RUN_UVX_TOOL_NAME = "run_uvx"
 STEP_META_KEY = "_step_meta"
 
 STEP_TYPE_TOOL = "tool"
 STEP_TYPE_ADVICE = "advice"
 STEP_TYPE_HALT = "halt"
+
+_ENGLISH_GOAL_NAMES = frozenset(
+    {EXECUTE_GOAL_TOOL_NAME, "uvx_cli", RUN_UVX_TOOL_NAME}
+)
+
+
+def is_english_goal_step(tool_name: str, arguments: dict[str, Any] | None) -> bool:
+    """True when the Executor should resolve CLI via ReAct + real uvx."""
+    name = (tool_name or "").strip()
+    args = arguments or {}
+    if name == EXECUTE_GOAL_TOOL_NAME or name == "uvx_cli":
+        return True
+    if name in _ENGLISH_GOAL_NAMES and (
+        args.get("instruction") or args.get("goal") or args.get("text")
+    ):
+        return True
+    return False
+
+
+def english_instruction(arguments: dict[str, Any] | None) -> str:
+    args = arguments or {}
+    for key in ("instruction", "goal", "text", "message"):
+        value = str(args.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 @dataclass

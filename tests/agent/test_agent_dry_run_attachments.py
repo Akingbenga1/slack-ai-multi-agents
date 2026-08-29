@@ -212,6 +212,124 @@ def test_agent_dry_run_multipart_file_stores_and_attaches(
     assert captured["attachments"][0]["storage_relative_path"]
 
 
+def test_agent_dry_run_multipart_multiple_files_stores_and_attaches(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict = {}
+
+    def _fake_plan_and_execute(**kwargs):
+        captured.update(kwargs)
+        return AgentResult(
+            role="facade",
+            client_id=str(DEMO_TENANT_ID),
+            status="succeeded",
+            message="ok",
+            extra={"workflow": "qa", "plan_id": str(UUID(int=2))},
+        )
+
+    monkeypatch.setattr(
+        "api.app.agent.facade.plan_and_execute",
+        _fake_plan_and_execute,
+    )
+
+    res = client.post(
+        "/agent/dry-run",
+        headers={"Authorization": f"Bearer {_token()}"},
+        data={
+            "question": "Compare the two attached PDFs.",
+            "include_trace": "true",
+        },
+        files=[
+            ("file", ("alpha.pdf", b"%PDF-1.4 alpha", "application/pdf")),
+            ("file", ("beta.pdf", b"%PDF-1.4 beta", "application/pdf")),
+        ],
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert len(body["attachments"]) == 2
+    assert body["attachments"][0]["filename"] == "alpha.pdf"
+    assert body["attachments"][1]["filename"] == "beta.pdf"
+    assert body["attachment"]["filename"] == "alpha.pdf"
+    assert len(captured["attachments"]) == 2
+    assert captured["attachments"][0]["filename"] == "alpha.pdf"
+    assert captured["attachments"][1]["filename"] == "beta.pdf"
+
+
+def test_agent_dry_run_json_with_upload_ids_passes_all_attachments(
+    client: TestClient,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    first = attachment_from_upload_bytes(
+        client_id=str(DEMO_TENANT_ID),
+        filename="alpha.pdf",
+        data=b"%PDF-1.4 alpha",
+        settings=settings,
+    )
+    second = attachment_from_upload_bytes(
+        client_id=str(DEMO_TENANT_ID),
+        filename="beta.pdf",
+        data=b"%PDF-1.4 beta",
+        settings=settings,
+    )
+    captured: dict = {}
+
+    def _fake_plan_and_execute(**kwargs):
+        captured.update(kwargs)
+        return AgentResult(
+            role="facade",
+            client_id=str(DEMO_TENANT_ID),
+            status="succeeded",
+            message="ok",
+            extra={"workflow": "document_summary", "plan_id": str(UUID(int=3))},
+        )
+
+    monkeypatch.setattr(
+        "api.app.agent.facade.plan_and_execute",
+        _fake_plan_and_execute,
+    )
+
+    res = client.post(
+        "/agent/dry-run",
+        headers={"Authorization": f"Bearer {_token()}"},
+        json={
+            "question": "Compare both attached PDFs.",
+            "upload_ids": [first["upload_id"], second["upload_id"]],
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert len(body["attachments"]) == 2
+    assert {item["upload_id"] for item in body["attachments"]} == {
+        first["upload_id"],
+        second["upload_id"],
+    }
+    assert len(captured["attachments"]) == 2
+
+
+def test_agent_dry_run_rejects_mixed_multipart_attachment_sources(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "api.app.agent.facade.plan_and_execute",
+        MagicMock(side_effect=AssertionError("must not run")),
+    )
+    res = client.post(
+        "/agent/dry-run",
+        headers={"Authorization": f"Bearer {_token()}"},
+        data={
+            "question": "Compare files",
+            "upload_id": "00000000-0000-0000-0000-000000000001",
+        },
+        files={
+            "file": ("alpha.pdf", b"%PDF-1.4", "application/pdf"),
+        },
+    )
+    assert res.status_code == 400
+
+
 def test_agent_dry_run_rejects_unknown_upload_id(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

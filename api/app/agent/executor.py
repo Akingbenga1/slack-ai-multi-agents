@@ -16,12 +16,15 @@ from sqlalchemy.orm import Session
 from api.app.agent.base import Agent, AgentContext, AgentResult
 from api.app.agent.llm import ChatModel, get_chat_model
 from api.app.agent.plan_steps import (
+    RUN_UVX_TOOL_NAME,
     STEP_TYPE_ADVICE,
     STEP_TYPE_HALT,
     STEP_TYPE_TOOL,
     ExecutionContext,
     check_preconditions,
+    english_instruction,
     infer_step_type,
+    is_english_goal_step,
     precondition_fail_message,
     step_message,
     step_meta,
@@ -33,10 +36,13 @@ from api.app.agent.tools import (
     ToolExecutionError,
     invoke_tool,
     is_unavailable_result,
+    lookup_tool,
     result_error,
     tool_result_message,
 )
 from api.app.agent.tool_rag import load_full_tool_schema
+from api.app.agent.llm import ToolSchema
+from api.app.agent.uvx_runner import run_uvx_from_arguments
 from api.app.db.models import AgentPlan, AgentPlanStep, AgentRun
 from api.app.db.plan_store import (
     get_agent_plan,
@@ -48,10 +54,556 @@ from api.app.logging_config import get_logger, log_tool_rag_activity
 logger = get_logger("api.agent.executor")
 
 _EXECUTOR_SYSTEM = (
-    "You are the execution agent. Given the user question and tool results, "
-    "write the final user-facing answer. Use only the provided tool results; "
-    "do not invent facts. Keep the answer concise and concrete."
+    "You are the execution agent composing the final user-facing answer. "
+    "Given the user's question and evidence from completed steps, write a clear, "
+    "accurate reply. Use only the provided evidence; do not invent facts. "
+    "When steps created or referenced files, mention their paths. "
+    "Keep the answer concise and actionable."
 )
+
+_REACT_UVX_SYSTEM = (
+    "You are a general-purpose execution agent. You receive one plain-English goal "
+    "at a time and must accomplish it using the tools available.\n\n"
+    "Available tools:\n"
+    "1) run_uvx — run a real PyPI CLI via uvx / uv tool run. You choose the package "
+    "and command-line arguments from your knowledge. Set help_only=true to inspect "
+    "a package CLI when unsure of flags.\n"
+    "2) write_text_file — write UTF-8 text (plain text, HTML, CSV, JSON, Markdown, "
+    "etc.) to a relative path under the working directory.\n"
+    "3) write_pdf_text — write a simple text-only PDF under the working directory "
+    "(for basic text PDFs; prefer run_uvx for merge, split, OCR, or rich PDF work).\n\n"
+    "How to work:\n"
+    "- Read the goal, success criteria, attachments, and any prior step results.\n"
+    "- Use attachment local_path values exactly (forward slashes are fine on Windows).\n"
+    "- Prefer run_uvx for conversions, merge/split/combine, OCR, table extraction, "
+    "compression, archives, spreadsheets, images, audio, and other CLI-capable tasks.\n"
+    "- Pick PyPI packages that expose a console script via uvx; pure libraries without "
+    "executables cannot be run directly.\n"
+    "- Write new outputs into the working directory with clear filenames. Never "
+    "delete or overwrite the original attachments.\n"
+    "- Multi-step plans: read prior step results before acting. If a step depends on "
+    "earlier work and prior results lack a path, inspect the working directory before "
+    "choosing tools or failing. Do not repeat work a prior step already finished.\n"
+    "- If success criteria appear already met (expected output file exists), confirm "
+    "and stop instead of running redundant tools.\n"
+    "- After each tool result: retry with corrected args, run another tool, or stop "
+    "when the success criteria are satisfied.\n"
+    "- Informational goals (summarize, compare, explain): once you have enough "
+    "content from tools, you may answer in plain text without further tool calls.\n"
+    "- File-producing goals (merge, convert, export, create): you must create the "
+    "output file via a tool — do not stop with prose alone.\n"
+    "- Always use tools to make progress; do not reply with an empty message."
+)
+
+_RUN_UVX_SCHEMA = ToolSchema(
+    name=RUN_UVX_TOOL_NAME,
+    description=(
+        "Install-and-run a PyPI console script via real uvx / uv tool run. "
+        "Args: package (PyPI name or name[extra]), optional from_spec, "
+        "args_list (CLI argv after the entrypoint)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "package": {"type": "string"},
+            "from_spec": {
+                "type": "string",
+                "description": "Optional uvx --from spec, e.g. markitdown[pdf]",
+            },
+            "args_list": {"type": "array", "items": {"type": "string"}},
+            "help_only": {"type": "boolean"},
+        },
+        "required": ["package"],
+    },
+)
+
+_WRITE_FILE_SCHEMA = ToolSchema(
+    name="write_text_file",
+    description=(
+        "Write UTF-8 text to a file under the working directory "
+        "(relative path only; creates parent dirs)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"},
+        },
+        "required": ["path", "content"],
+    },
+)
+
+_WRITE_PDF_SCHEMA = ToolSchema(
+    name="write_pdf_text",
+    description=(
+        "Write a simple text PDF into the working directory using local fpdf2. "
+        "Args: path (relative filename), text (body), optional title."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "text": {"type": "string"},
+            "title": {"type": "string"},
+        },
+        "required": ["path", "text"],
+    },
+)
+
+def _uvx_max_attempts(extra: dict[str, Any]) -> int:
+    settings = extra.get("settings")
+    if settings is None:
+        from api.app.settings import get_settings
+
+        settings = get_settings()
+    return max(1, int(getattr(settings, "executor_uvx_max_attempts", 8) or 8))
+
+
+def _resolve_working_dir(context: AgentContext, arguments: dict[str, Any]) -> str | None:
+    from pathlib import Path
+
+    def _as_dir(raw: object) -> str | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        path = Path(text)
+        if path.is_dir():
+            return str(path.resolve())
+        if path.is_file():
+            return str(path.parent.resolve())
+        # Not on disk yet — if it looks like a file, use parent
+        if path.suffix:
+            return str(path.parent.resolve()) if str(path.parent) not in {"", "."} else None
+        return str(path.resolve())
+
+    for key in ("cwd", "working_dir"):
+        resolved = _as_dir(arguments.get(key))
+        if resolved:
+            return resolved
+    # local_path on args/attachments is often a file; use its parent directory
+    resolved = _as_dir(arguments.get("local_path"))
+    if resolved:
+        return resolved
+    for att in context.attachments or []:
+        if not isinstance(att, dict):
+            continue
+        for key in ("working_dir", "local_path", "path"):
+            resolved = _as_dir(att.get(key))
+            if resolved:
+                return resolved
+    return None
+
+
+def _write_text_file(
+    arguments: dict[str, Any],
+    *,
+    cwd: str | None,
+) -> dict[str, Any]:
+    """Write a relative UTF-8 text file under cwd (sandbox)."""
+    from pathlib import Path
+
+    rel = str(arguments.get("path") or "").strip().replace("\\", "/")
+    content = arguments.get("content")
+    if content is None:
+        for key in ("text", "body", "html", "markdown", "data"):
+            if arguments.get(key) is not None:
+                content = arguments.get(key)
+                break
+    if (
+        not rel
+        or rel.startswith("/")
+        or rel.startswith("~")
+        or ".." in Path(rel).parts
+    ):
+        return {
+            "ok": False,
+            "error": "path must be a relative file under the working directory",
+        }
+    if content is None:
+        return {"ok": False, "error": "content is required"}
+    base = Path(cwd).resolve() if cwd else Path.cwd().resolve()
+    target = (base / rel).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return {"ok": False, "error": "path escapes working directory"}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = str(content)
+    target.write_text(data, encoding="utf-8")
+    return {
+        "ok": True,
+        "path": str(target),
+        "output_file": str(target),
+        "bytes_written": len(data.encode("utf-8")),
+    }
+
+
+
+def _write_pdf_text(
+    arguments: dict[str, Any],
+    *,
+    cwd: str | None,
+) -> dict[str, Any]:
+    """Create a simple text PDF under cwd using project fpdf2."""
+    from pathlib import Path
+
+    from fpdf import FPDF
+
+    rel = str(arguments.get("path") or "output.pdf").strip().replace(chr(92), "/")
+    body = arguments.get("text")
+    if body is None:
+        body = arguments.get("content") or arguments.get("body") or ""
+    title = str(arguments.get("title") or "Document Summary").strip() or "Document Summary"
+    if (
+        not rel
+        or rel.startswith("/")
+        or rel.startswith("~")
+        or ".." in Path(rel).parts
+    ):
+        return {"ok": False, "error": "path must be a relative PDF under the working directory"}
+    if not str(body).strip():
+        return {"ok": False, "error": "text is required"}
+    base = Path(cwd).resolve() if cwd else Path.cwd().resolve()
+    target = (base / rel).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return {"ok": False, "error": "path escapes working directory"}
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.multi_cell(0, 8, title)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", size=11)
+    safe = str(body).encode("latin-1", "replace").decode("latin-1")
+    pdf.multi_cell(0, 6, safe)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pdf.output(str(target))
+    return {
+        "ok": True,
+        "path": str(target),
+        "output_file": str(target),
+        "bytes_written": target.stat().st_size,
+    }
+
+
+def _execute_run_uvx_call(
+    arguments: dict[str, Any],
+    *,
+    context: AgentContext,
+    extra: dict[str, Any],
+    db: Session,
+) -> dict[str, Any]:
+    """Prefer injected test tool; otherwise call real uvx_runner."""
+    args = dict(arguments or {})
+    cwd = _resolve_working_dir(context, args)
+    if cwd and "cwd" not in args:
+        args["cwd"] = cwd
+    injected = lookup_tool(
+        RUN_UVX_TOOL_NAME, client_id=context.client_id, db=db, extra=extra
+    )
+    if injected is not None and injected.source == "injected" and injected.invoke:
+        return invoke_tool(
+            injected, args, client_id=context.client_id, db=db, extra=extra
+        )
+    return run_uvx_from_arguments(args)
+
+
+def _summarize_step_result(val: dict[str, Any]) -> str:
+    """Compact, tool-agnostic summary of one prior step result."""
+    parts: list[str] = []
+    if val.get("ok") is True:
+        parts.append("status: succeeded")
+    elif val.get("ok") is False:
+        err = str(val.get("error") or "failed").strip()
+        parts.append(f"status: failed ({err})")
+
+    for key in ("output_file", "path", "done_text"):
+        text = str(val.get(key) or "").strip()
+        if text:
+            parts.append(f"{key}: {text}")
+
+    attempts = val.get("attempts")
+    if isinstance(attempts, list) and not any(
+        p.startswith(("output_file:", "path:")) for p in parts
+    ):
+        for attempt in reversed(attempts):
+            if not isinstance(attempt, dict) or not attempt.get("ok"):
+                continue
+            artifact = str(
+                attempt.get("output_file") or attempt.get("path") or ""
+            ).strip()
+            if artifact:
+                parts.append(f"output_file: {artifact}")
+                break
+
+    stdout = str(val.get("stdout") or "").strip()
+    if stdout:
+        parts.append(f"stdout:\n{stdout[:2000]}")
+
+    return "\n".join(parts)
+
+
+def _format_prior_step_results(prior: dict[str, Any] | None) -> str:
+    if not isinstance(prior, dict) or not prior:
+        return "(none)"
+    chunks: list[str] = []
+    for key, val in list(prior.items())[:8]:
+        if isinstance(val, dict):
+            snippet = _summarize_step_result(val)
+        else:
+            snippet = str(val)[:1000]
+        if snippet.strip():
+            chunks.append(f"[{key}]\n{snippet}")
+    return "\n\n".join(chunks) if chunks else "(none)"
+
+
+def _build_react_user_prompt(
+    *,
+    context: AgentContext,
+    instruction: str,
+    success_criteria: str | None,
+    cwd: str | None,
+    attachment_block: str,
+    prior_block: str,
+) -> str:
+    return "\n".join(
+        [
+            f"User question: {context.question or ''}",
+            f"Goal: {instruction}",
+            f"Success criteria: {success_criteria or '(meet the goal)'}",
+            f"Working directory: {cwd or '(default)'}",
+            "Attachments (use exact local_path; forward slashes are fine):",
+            attachment_block,
+            "Prior step results (reuse when possible):",
+            prior_block,
+        ]
+    )
+
+
+def _react_success_from_attempts(
+    attempts: list[dict[str, Any]],
+    *,
+    instruction: str,
+    done_text: str = "",
+) -> dict[str, Any] | None:
+    """Return a success payload when tool attempts already satisfy the goal."""
+    if not any(a.get("ok") for a in attempts):
+        return None
+    last_ok = next(a for a in reversed(attempts) if a.get("ok"))
+    payload = {
+        **last_ok,
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+        "instruction": instruction,
+    }
+    if done_text:
+        payload["done_text"] = done_text
+    output = last_ok.get("output_file") or last_ok.get("path")
+    if output:
+        payload["output_file"] = output
+    return payload
+
+
+def _run_english_goal_react(
+    *,
+    context: AgentContext,
+    extra: dict[str, Any],
+    db: Session,
+    instruction: str,
+    success_criteria: str | None,
+    step_arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """ReAct loop: LLM chooses package/args; real uvx executes."""
+    max_attempts = _uvx_max_attempts(extra)
+    attempts: list[dict[str, Any]] = []
+    cwd = _resolve_working_dir(context, step_arguments)
+    attachment_lines: list[str] = []
+    for att in context.attachments or []:
+        if not isinstance(att, dict):
+            continue
+        name = att.get("filename") or ""
+        local = att.get("local_path") or ""
+        if local:
+            local = str(local).replace("\\", "/")
+        if name or local:
+            attachment_lines.append(f"- filename={name!r} local_path={local!r}")
+    attachment_block = "\n".join(attachment_lines) if attachment_lines else "(none)"
+
+    prior_block = _format_prior_step_results(step_arguments.get("prior_step_results"))
+
+    user = _build_react_user_prompt(
+        context=context,
+        instruction=instruction,
+        success_criteria=success_criteria,
+        cwd=cwd,
+        attachment_block=attachment_block,
+        prior_block=prior_block,
+    )
+    messages: list[dict[str, str]] = [{"role": "user", "content": user}]
+    model = _chat_model(extra)
+    last_result: dict[str, Any] = {
+        "ok": False,
+        "error": "no uvx attempts",
+        "attempt_count": 0,
+        "attempts": [],
+        "instruction": instruction,
+    }
+
+    for round_i in range(max_attempts):
+        llm = model.complete(
+            system=_REACT_UVX_SYSTEM,
+            messages=messages,
+            model_tier="fast",
+            tools=[_RUN_UVX_SCHEMA, _WRITE_FILE_SCHEMA, _WRITE_PDF_SCHEMA],
+        )
+        if not llm.has_tool_calls:
+            done_text = (llm.text or "").strip()
+            success = _react_success_from_attempts(
+                attempts, instruction=instruction, done_text=done_text
+            )
+            if success is not None:
+                return success
+            if done_text and len(done_text) > 40:
+                return {
+                    "ok": True,
+                    "stdout": done_text,
+                    "done_text": done_text,
+                    "attempt_count": len(attempts),
+                    "attempts": attempts,
+                    "instruction": instruction,
+                }
+            if round_i < max_attempts - 1:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": done_text or "(no tool call yet)",
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You must make progress using run_uvx, write_text_file, "
+                            "or write_pdf_text. Choose an appropriate PyPI package "
+                            "and call run_uvx now, or write the required output file."
+                        ),
+                    }
+                )
+                continue
+            last_result = {
+                "ok": False,
+                "error": done_text or "executor stopped without success",
+                "attempt_count": len(attempts),
+                "attempts": attempts,
+                "instruction": instruction,
+            }
+            break
+
+        for call in llm.tool_calls:
+            call_name = (call.name or "").strip()
+            call_args = dict(call.arguments or {})
+            if call_name == "write_pdf_text":
+                result = _write_pdf_text(call_args, cwd=cwd)
+                attempt = {**result, "round": round_i + 1, "tool": call_name}
+                attempts.append(attempt)
+                last_result = {
+                    **attempt,
+                    "attempt_count": len(attempts),
+                    "attempts": attempts,
+                    "instruction": instruction,
+                }
+                obs = (
+                    f"write_pdf_text ok={attempt.get('ok')!r} "
+                    f"path={attempt.get('path')!r} "
+                    f"error={attempt.get('error')!r}"
+                )
+                messages.append({"role": "user", "content": f"Tool result:\n{obs}"})
+                if attempt.get("ok") is True:
+                    return {
+                        **attempt,
+                        "attempt_count": len(attempts),
+                        "attempts": attempts,
+                        "instruction": instruction,
+                        "output_file": attempt.get("output_file") or attempt.get("path"),
+                    }
+                continue
+            if call_name == "write_text_file":
+                result = _write_text_file(call_args, cwd=cwd)
+                attempt = {**result, "round": round_i + 1, "tool": call_name}
+                attempts.append(attempt)
+                last_result = {
+                    **attempt,
+                    "attempt_count": len(attempts),
+                    "attempts": attempts,
+                    "instruction": instruction,
+                }
+                obs = (
+                    f"write_text_file ok={attempt.get('ok')!r} "
+                    f"path={attempt.get('path')!r} "
+                    f"error={attempt.get('error')!r}"
+                )
+                messages.append({"role": "user", "content": f"Tool result:\n{obs}"})
+                continue
+            if call_name != RUN_UVX_TOOL_NAME:
+                attempts.append(
+                    {
+                        "ok": False,
+                        "error": f"unsupported tool call: {call.name}",
+                        "package": None,
+                        "tool": call_name,
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Tool result ERROR: only run_uvx, write_text_file, and "
+                            "write_pdf_text are allowed. Try again."
+                        ),
+                    }
+                )
+                continue
+            if cwd and "cwd" not in call_args:
+                call_args["cwd"] = cwd
+            result = _execute_run_uvx_call(
+                call_args, context=context, extra=extra, db=db
+            )
+            attempt = {
+                **(
+                    result
+                    if isinstance(result, dict)
+                    else {"ok": False, "error": str(result)}
+                ),
+                "round": round_i + 1,
+                "tool": RUN_UVX_TOOL_NAME,
+            }
+            attempts.append(attempt)
+            last_result = {
+                **attempt,
+                "attempt_count": len(attempts),
+                "attempts": attempts,
+                "instruction": instruction,
+            }
+            obs = (
+                f"uvx package={attempt.get('package')!r} "
+                f"exit={attempt.get('exit_code')!r} ok={attempt.get('ok')!r}\n"
+                f"stdout:\n{(attempt.get('stdout') or '')[:4000]}\n"
+                f"stderr:\n"
+                f"{(attempt.get('stderr') or attempt.get('error') or '')[:1000]}"
+            )
+            messages.append({"role": "user", "content": f"Tool result:\n{obs}"})
+
+    if any(a.get("ok") for a in attempts):
+        success = _react_success_from_attempts(attempts, instruction=instruction)
+        if success is not None:
+            return success
+    last_result["attempt_count"] = len(attempts)
+    last_result["attempts"] = attempts
+    if not last_result.get("error"):
+        last_result["error"] = "uvx attempts exhausted without success"
+    return last_result
 
 
 def _chat_model(extra: dict[str, Any]) -> ChatModel:
@@ -89,7 +641,14 @@ def _compose_final_answer(
         )
         return fallback
     text = (result.text or "").strip()
-    return text or fallback
+    if not text or text in {
+        "All steps completed.",
+        "All done.",
+        "done",
+        "Done.",
+    }:
+        return fallback
+    return text
 
 
 def _session(extra: dict[str, Any]) -> tuple[Session, bool]:
@@ -290,35 +849,6 @@ class ExecutorAgent(Agent):
                     extra={"plan_id": str(plan.id), "run_id": str(run.id)},
                 )
 
-            ref = discovery.find(tool_name, client_id=context.client_id)
-            if ref is None:
-                error_msg = f"tool not found: {tool_name}"
-                step.status = "failed"
-                step.error = error_msg
-                _skip_remaining(steps, index)
-                _finish_run(plan, run, status="failed", error=error_msg)
-                db.commit()
-                return AgentResult(
-                    role=self.role,
-                    client_id=context.client_id,
-                    status="failed",
-                    message=error_msg,
-                    extra={"plan_id": str(plan.id), "run_id": str(run.id)},
-                )
-
-            # Lazy-load full schema/config only after the tool is chosen.
-            full_schema = load_full_tool_schema(ref)
-            log_tool_rag_activity(
-                phase="executor_resolve",
-                client_id=context.client_id,
-                plan_id=str(plan.id),
-                step_index=index,
-                tool_name=ref.name,
-                kind=ref.kind,
-                source=ref.source,
-                has_subcommands=bool(full_schema.get("subcommands")),
-            )
-
             step.status = "running"
             db.flush()
             invoke_args = tool_arguments(step.arguments)
@@ -329,13 +859,75 @@ class ExecutorAgent(Agent):
                 }
 
             try:
-                result = invoke_tool(
-                    ref,
-                    invoke_args,
-                    client_id=context.client_id,
-                    db=db,
-                    extra=extra,
-                )
+                if is_english_goal_step(tool_name, invoke_args):
+                    instruction = english_instruction(invoke_args) or (
+                        step.success_criteria or tool_name
+                    )
+                    log_tool_rag_activity(
+                        phase="executor_english_goal",
+                        client_id=context.client_id,
+                        plan_id=str(plan.id),
+                        step_index=index,
+                        tool_name=tool_name,
+                        instruction=instruction[:200],
+                    )
+                    result = _run_english_goal_react(
+                        context=context,
+                        extra=extra,
+                        db=db,
+                        instruction=instruction,
+                        success_criteria=step.success_criteria,
+                        step_arguments=invoke_args,
+                    )
+                elif tool_name == RUN_UVX_TOOL_NAME:
+                    log_tool_rag_activity(
+                        phase="executor_run_uvx",
+                        client_id=context.client_id,
+                        plan_id=str(plan.id),
+                        step_index=index,
+                        tool_name=tool_name,
+                    )
+                    result = _execute_run_uvx_call(
+                        invoke_args, context=context, extra=extra, db=db
+                    )
+                    if isinstance(result, dict):
+                        result.setdefault("attempt_count", 1)
+                else:
+                    ref = discovery.find(tool_name, client_id=context.client_id)
+                    if ref is None:
+                        error_msg = f"tool not found: {tool_name}"
+                        step.status = "failed"
+                        step.error = error_msg
+                        _skip_remaining(steps, index)
+                        _finish_run(plan, run, status="failed", error=error_msg)
+                        db.commit()
+                        return AgentResult(
+                            role=self.role,
+                            client_id=context.client_id,
+                            status="failed",
+                            message=error_msg,
+                            extra={"plan_id": str(plan.id), "run_id": str(run.id)},
+                        )
+
+                    # Lazy-load full schema/config only after the tool is chosen.
+                    full_schema = load_full_tool_schema(ref)
+                    log_tool_rag_activity(
+                        phase="executor_resolve",
+                        client_id=context.client_id,
+                        plan_id=str(plan.id),
+                        step_index=index,
+                        tool_name=ref.name,
+                        kind=ref.kind,
+                        source=ref.source,
+                        has_subcommands=bool(full_schema.get("subcommands")),
+                    )
+                    result = invoke_tool(
+                        ref,
+                        invoke_args,
+                        client_id=context.client_id,
+                        db=db,
+                        extra=extra,
+                    )
             except ToolExecutionError as exc:
                 error_msg = str(exc)
                 step.status = "failed"

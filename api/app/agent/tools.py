@@ -239,6 +239,18 @@ def lookup_tool(
             invoke=injected[tool_name],
         )
 
+    # Built-in host tool: real uvx install-and-run (no tool_registry row).
+    if tool_name == "run_uvx":
+        from api.app.agent.uvx_runner import run_uvx_from_arguments
+
+        return ToolRef(
+            name="run_uvx",
+            source="builtin",
+            kind="code",
+            description="Run a PyPI CLI via real uvx / uv tool run",
+            invoke=run_uvx_from_arguments,
+        )
+
     row: ToolRegistry | None = get_tool_registry(
         db, tenant_id=client_id, name=tool_name
     )

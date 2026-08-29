@@ -23,6 +23,7 @@ from api.app.agent.guardrails import (
 from api.app.agent.llm import ChatModel, get_chat_model
 from api.app.agent.plan_steps import (
     ADVICE_STEP_TOOL_NAME,
+    EXECUTE_GOAL_TOOL_NAME,
     HALT_STEP_TOOL_NAME,
     STEP_TYPE_ADVICE,
     STEP_TYPE_HALT,
@@ -31,13 +32,7 @@ from api.app.agent.plan_steps import (
     extract_on_precondition_fail,
     extract_preconditions,
 )
-from api.app.agent.tool_rag import (
-    build_retrieval_query,
-    get_tool_rag,
-    skinny_catalog,
-    summarize_workflow_body,
-)
-from api.app.agent.tools import DbToolDiscovery, ToolDiscovery, ToolRef
+from api.app.agent.tool_rag import summarize_workflow_body
 from api.app.db.plan_store import insert_agent_plan, insert_agent_plan_step
 from api.app.logging_config import get_logger, log_tool_rag_activity
 
@@ -49,38 +44,17 @@ _PLAN_SYSTEM = (
     "You are a planning agent. Produce a JSON execution plan only. "
     "Do not execute tools, post to Slack, send email, generate PDF or PPTX, "
     "or mutate a workflow library. "
-    "The user message includes a shortlisted tool catalog retrieved for this request "
-    "(skinny rows: name, kind, and one short description only — not the full tenant "
-    "registry, and not full CLI/MCP schemas). "
-    "Read each tool's name, kind, and description and choose only the tools needed "
-    "for the request. "
-    "Every step tool_name MUST exactly match a catalog name — never invent, rename, "
-    "or hallucinate tools that are not in the shortlist. "
-    "Full CLI subcommands and large schemas are loaded later at execution time. "
-    "When a step needs a CLI tool, set arguments with a best-effort "
-    "\"subcommand\" and \"args_list\" (array of CLI arguments after the subcommand, "
-    "e.g. input/output paths) derived from the user request. "
-    "For file-producing CLI steps you may also set \"output_file\" or "
-    "\"expected_output_path\". "
-    "Do not invent registry default args — derive args_list from the user request. "
-    "Assign a catalog tool to a step only when you judge that tool can genuinely "
-    "implement that step — never invent tool names, and never assign a tool merely "
-    "because it is the only one listed (for example, do not use csvkit for work it "
-    "cannot perform, such as document summarization or Slack posting). "
+    "Do NOT use a tool registry or tool catalog. Plan in plain English only. "
+    "Each work step must use tool_name \"execute_goal\" with arguments.instruction "
+    "(plain English) and success_criteria describing done. "
+    "Do not invent CLI package names, uvx commands, or registry tool ids at plan time — "
+    "the Executor chooses packages and runs real uvx later. "
     "When a stored workflow body is provided, treat it as the primary guide: read "
-    "its steps and rules, decide which document steps any catalog tool can implement, "
-    "derive success criteria from the document, and apply user overrides (skip listed "
-    "steps; change channels; fill run-specific args). "
-    "Include only steps where a catalog tool is a reasonable fit. "
-    "When a workflow document step has no suitable catalog tool, do not force a "
-    "mismatched tool (for example csvkit for document summarization). Instead "
-    "include an advice step: "
+    "its steps and rules, turn document steps into English execute_goal steps, "
+    "derive success criteria from the document, and apply user overrides. "
+    "When a document step cannot be automated, include an advice step: "
     "{\"step_type\": \"advice\", \"advice\": \"<guidance or alternative>\", "
     "\"success_criteria\": \"...\"}. "
-    "Advice steps need no catalog tool — use them for gaps, alternatives, or "
-    "guidance when a document step cannot be automated yet. "
-    "Prefer a mix of tool steps and advice steps when the workflow body spans both "
-    "automatable and non-automatable work. "
     "CONTROL FLOW (mandatory for runtime checks): "
     "Any step may declare preconditions, e.g. "
     "\"requires_attachment\": true or \"requires\": [\"attachment\"]. "
@@ -92,9 +66,10 @@ _PLAN_SYSTEM = (
     "Do not plan tool steps that would run after a precondition you know will fail "
     "given the attachment metadata in the user message. "
     "Advice steps may set \"stop_after\": true when they block further work; "
-    "otherwise later tool steps may still run. "
-    "Reply with JSON: {\"workflow\": \"<type>\", \"steps\": [{\"tool_name\": \"...\", "
-    "\"arguments\": {}, \"success_criteria\": \"...\", "
+    "otherwise later steps may still run. "
+    "Reply with JSON: {\"workflow\": \"<type>\", \"steps\": ["
+    "{\"tool_name\": \"execute_goal\", "
+    "\"arguments\": {\"instruction\": \"...\"}, \"success_criteria\": \"...\", "
     "\"requires_attachment\": false}, "
     "{\"step_type\": \"advice\", \"advice\": \"...\", \"success_criteria\": \"...\"}, "
     "{\"step_type\": \"halt\", \"message\": \"...\"}]}. "
@@ -110,10 +85,15 @@ _PLAN_SYSTEM = (
     "NEVER plan shell or CLI steps whose purpose is deletion (rm, del, rmdir, "
     "unlink, shred, or equivalent). "
     "If the user asks to delete files, rows, tables, or other stored data — even "
-    "when a matching tool exists — refuse: return "
+    "in English — refuse: return "
     "{\"workflow\": \"qa\", \"steps\": []}. "
     "Prefer read-only, additive, or compose-only steps: fetch, search, list, get, "
-    "download, parse, summarize, compose, create (new artifacts), upload (new files)."
+    "download, parse, summarize, compose, create (new artifacts), upload (new files). "
+    "Plan the minimum steps needed: each execute_goal should perform one distinct "
+    "transformation. When a step creates a new file in the working directory, do not "
+    "add a follow-up step to upload, save, or re-register that same artifact unless "
+    "the user explicitly asked for a separate delivery action. Describe in "
+    "success_criteria what each step produces."
 )
 
 
@@ -215,10 +195,35 @@ def parse_plan(raw: str) -> tuple[str, list[dict[str, Any]]]:
                 steps.append(step_payload)
             continue
         name = str(item.get("tool_name") or item.get("name") or "").strip()
+        raw_args = item.get("arguments")
+        args = dict(raw_args) if isinstance(raw_args, dict) else {}
+        instruction = str(
+            args.get("instruction")
+            or args.get("goal")
+            or item.get("instruction")
+            or item.get("goal")
+            or ""
+        ).strip()
+        if instruction and "instruction" not in args:
+            args["instruction"] = instruction
+        if criteria is not None and "success_criteria" not in args:
+            # keep column value; also mirror for executor convenience
+            pass
+        # English goal without catalog tool id
+        if not name and instruction:
+            name = EXECUTE_GOAL_TOOL_NAME
         if not name:
             continue
-        raw_args = item.get("arguments")
-        args = raw_args if isinstance(raw_args, dict) else {}
+        # Normalize legacy/catalog-looking names that carry only English goals
+        if instruction and name not in {
+            ADVICE_STEP_TOOL_NAME,
+            HALT_STEP_TOOL_NAME,
+            EXECUTE_GOAL_TOOL_NAME,
+            "uvx_cli",
+            "run_uvx",
+        }:
+            # Keep explicit non-goal tool names for injected/test tools.
+            pass
         tool_step: dict[str, Any] = {
             "tool_name": name,
             "arguments": args or {},
@@ -240,27 +245,6 @@ def parse_plan_steps(raw: str) -> list[dict[str, Any]]:
     return steps
 
 
-def _tool_discovery(db: Session, extra: dict[str, Any]) -> ToolDiscovery:
-    injected = extra.get("tool_discovery")
-    if injected is not None:
-        return injected
-    return DbToolDiscovery(db, extra)
-
-
-def _tool_catalog(refs: list[ToolRef]) -> list[dict[str, Any]]:
-    """Skinny planner rows only — never paste full CLI/MCP schemas here."""
-    catalog: list[dict[str, Any]] = []
-    for ref in sorted(refs, key=lambda item: item.name):
-        entry: dict[str, Any] = {"name": ref.name}
-        if ref.kind:
-            entry["kind"] = ref.kind
-        description = (ref.description or "").strip()
-        if description:
-            entry["description"] = description
-        catalog.append(entry)
-    return catalog
-
-
 def _workflow_body_for_prompt(
     gathered: GatheredContext,
     *,
@@ -279,24 +263,14 @@ def _workflow_body_for_prompt(
 def _planning_user_message(
     gathered: GatheredContext,
     *,
-    tool_catalog: list[dict[str, Any]],
     workflow_body_max_chars: int = 1500,
     client_id: str | None = None,
 ) -> str:
-    parts = [f"User request:\n{gathered.question}"]
-    if tool_catalog:
-        parts.append(
-            "Shortlisted tool catalog for this request "
-            "(skinny rows only — choose tool_name from this list; full schemas "
-            "load at execution):\n"
-            + json.dumps(tool_catalog, indent=2)
-        )
-    else:
-        parts.append(
-            "Shortlisted tool catalog for this request: none. "
-            "You cannot assign tool_name values without shortlisted tools — "
-            "do not invent tool names."
-        )
+    parts = [
+        f"User request:\n{gathered.question}",
+        "Plan plain-English execute_goal steps only. "
+        "Do not use a tool registry or invent CLI package names.",
+    ]
     if gathered.attachments:
         parts.append(
             "Attachment metadata (do not assume file contents):\n"
@@ -319,14 +293,10 @@ def _planning_user_message(
             )
         )
         parts.append(
-            "Use the stored workflow document body as the source of truth. Read its "
-            "steps and rules, then decide which document steps any catalog tool can "
-            "implement. Assign a tool only when it can genuinely help — do not force "
-            "a listed tool (e.g. csvkit) onto work it cannot perform. "
-            "For document steps no catalog tool can serve, add an advice step "
-            "(step_type \"advice\") with guidance or an alternative instead of "
-            "omitting the step. Apply user overrides (skip listed steps; change "
-            "channels; fill run-specific args)."
+            "Use the stored workflow document body as the source of truth. "
+            "Turn each automatable document step into an execute_goal with a clear "
+            "English instruction and success_criteria. "
+            "For steps that cannot be automated, add an advice step."
         )
     if gathered.channel_names:
         parts.append("Channel names mentioned: " + ", ".join(gathered.channel_names))
@@ -430,7 +400,6 @@ class OrchestratorAgent(Agent):
                 extra={"plan_id": str(plan_id), "workflow": "qa"},
             )
 
-        discovery = _tool_discovery(db, extra)
         settings = extra.get("settings")
         if settings is None:
             from api.app.settings import get_settings
@@ -438,40 +407,24 @@ class OrchestratorAgent(Agent):
             settings = get_settings()
             extra = {**extra, "settings": settings}
 
-        retrieval_query = build_retrieval_query(
-            gathered.question,
-            attachments=gathered.attachments,
-            workflow_title=(
-                str((gathered.workflow or {}).get("title") or "") or None
-            ),
-        )
-        rag = get_tool_rag(extra)
-        shortlisted = rag.shortlist(
-            client_id=context.client_id,
-            query=retrieval_query,
-            discovery=discovery,
-            top_k=int(getattr(settings, "tool_rag_top_k", 12) or 12),
-        )
-        catalog = skinny_catalog(shortlisted)
         workflow_body_max = int(
             getattr(settings, "tool_rag_workflow_body_chars", 1500) or 1500
         )
         user_prompt = _planning_user_message(
             gathered,
-            tool_catalog=catalog,
             workflow_body_max_chars=workflow_body_max,
             client_id=context.client_id,
         )
         log_tool_rag_activity(
             phase="plan_context",
             client_id=context.client_id,
-            retrieval_query=retrieval_query,
-            shortlist_count=len(catalog),
-            shortlist_names=[row.get("name") for row in catalog],
+            shortlist_count=0,
+            shortlist_names=[],
             attachment_count=len(gathered.attachments or []),
             has_workflow=gathered.workflow is not None,
             prompt_chars=len(user_prompt),
             includes_subcommands=False,
+            english_goals=True,
         )
         include_trace = bool(extra.get("include_trace"))
 
@@ -488,7 +441,6 @@ class OrchestratorAgent(Agent):
             max_tokens=settings.orchestrator_max_tokens,
         )
         workflow, steps = parse_plan(result.text)
-        shortlist_names = {str(row.get("name") or "") for row in catalog}
         planned_tools = [
             str(step.get("tool_name") or "")
             for step in steps
@@ -500,11 +452,8 @@ class OrchestratorAgent(Agent):
             workflow=workflow,
             step_count=len(steps),
             planned_tools=planned_tools,
-            tools_from_shortlist=all(
-                name in shortlist_names
-                or name in {"advice", "halt"}
-                for name in planned_tools
-            ),
+            tools_from_shortlist=False,
+            english_goals=True,
         )
 
         def _trace_fields(**more: Any) -> dict[str, Any]:

@@ -399,11 +399,10 @@ class TestIsolation:
 class TestToolRagSystemBehaviour:
     """Maps 1:1 to the Tool RAG System Behaviour Test section.
 
-    Light gather → filter → retrieve → skinny shortlist → plan → execute
-    with full schemas only after a tool is chosen.
+    English-goal planning without tool-registry shortlist injection.
     """
 
-    def test_planner_sees_skinny_shortlist_not_full_catalog(
+    def test_planner_uses_english_goals_without_tool_catalog(
         self, db: Session, tenant_a: Tenant
     ):
         from api.app.agent.base import AgentContext
@@ -411,7 +410,7 @@ class TestToolRagSystemBehaviour:
         from api.app.agent.llm import StubChatModel
         from api.app.db.tool_store import insert_tool_registry
 
-        # Large registry — planner must not receive every row / subcommands.
+        # Registry noise must not be injected into the planner prompt.
         for i in range(30):
             insert_tool_registry(
                 db,
@@ -421,37 +420,15 @@ class TestToolRagSystemBehaviour:
                 description=f"Unrelated utility {i}",
                 config={"subcommands": {f"sub_{i}": {"purpose": "noise"}}},
             )
-        insert_tool_registry(
-            db,
-            tenant_id=str(tenant_a.id),
-            name="create_powerpoint",
-            kind="code",
-            description="Create a PowerPoint presentation from figures",
-            config={
-                "subcommands": {"build": {"purpose": "render pptx"}},
-                "example_queries": ["create powerpoint financial report"],
-            },
-        )
-        insert_tool_registry(
-            db,
-            tenant_id=str(tenant_a.id),
-            name="parse_spreadsheet",
-            kind="code",
-            description="Parse excel spreadsheet figures",
-            config={"subcommands": {"parse": {"purpose": "extract cells"}}},
-        )
         db.commit()
 
         steps = [
             {
-                "tool_name": "parse_spreadsheet",
-                "arguments": {},
-                "success_criteria": "figures",
-            },
-            {
-                "tool_name": "create_powerpoint",
-                "arguments": {"pages": 3},
-                "success_criteria": "pptx",
+                "tool_name": "execute_goal",
+                "arguments": {
+                    "instruction": "Create a 3 page financial report pptx from the excel file"
+                },
+                "success_criteria": "pptx exists",
             },
         ]
         recorded: list[str] = []
@@ -496,21 +473,14 @@ class TestToolRagSystemBehaviour:
         assert result.status == "ready"
         assert recorded, "orchestrator must send a planner prompt"
         prompt = recorded[0]
-        assert "Shortlisted tool catalog" in prompt
-        assert "subcommands" not in prompt
-        assert "noise_tool_00" not in prompt or prompt.count("noise_tool_") <= 8
-        # Full registry dump would list all 30 noise tools.
-        assert prompt.count("noise_tool_") < 30
-        assert "create_powerpoint" in prompt or "parse_spreadsheet" in prompt
-
+        assert "Shortlisted tool catalog" not in prompt
+        assert "noise_tool_" not in prompt
+        assert "execute_goal" in prompt
         plan_id = result.extra["plan_id"]
         plan_steps = list_agent_plan_steps(
             db, tenant_id=str(tenant_a.id), plan_id=plan_id
         )
-        assert [s.tool_name for s in plan_steps] == [
-            "parse_spreadsheet",
-            "create_powerpoint",
-        ]
+        assert [s.tool_name for s in plan_steps] == ["execute_goal"]
 
     def test_executor_lazy_loads_full_schema_after_plan(
         self, db: Session, tenant_a: Tenant

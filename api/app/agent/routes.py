@@ -26,6 +26,7 @@ logger = get_logger("api.agent.routes")
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 _MAX_DRY_RUN_UPLOAD_BYTES = 50 * 1024 * 1024
+_MAX_DRY_RUN_ATTACHMENTS = 10
 
 
 class DryRunRequest(BaseModel):
@@ -44,10 +45,20 @@ class DryRunRequest(BaseModel):
         description="Existing tenant upload id ({upload_id}_filename under UPLOAD_DIR).",
         max_length=80,
     )
+    upload_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Multiple existing tenant upload ids (JSON body only).",
+        max_length=_MAX_DRY_RUN_ATTACHMENTS,
+    )
     storage_relative_path: Optional[str] = Field(
         default=None,
         description="Existing blob key (tenant-scoped) to attach for this dry-run.",
         max_length=500,
+    )
+    storage_relative_paths: Optional[list[str]] = Field(
+        default=None,
+        description="Multiple existing blob keys (JSON body only).",
+        max_length=_MAX_DRY_RUN_ATTACHMENTS,
     )
 
 
@@ -85,6 +96,7 @@ class DryRunResponse(BaseModel):
     orchestrator_user_prompt: str | None = None
     plan_steps: list[dict[str, Any]] | None = None
     attachment: DryRunAttachmentInfo | None = None
+    attachments: list[DryRunAttachmentInfo] = Field(default_factory=list)
 
 
 class AllowlistBody(BaseModel):
@@ -248,13 +260,14 @@ async def agent_dry_run(
     """
     Run orchestrator → executor offline for the caller's tenant (no Slack reply).
 
-    JSON body: ``DryRunRequest`` (optional ``upload_id`` / ``storage_relative_path``).
+    JSON body: ``DryRunRequest`` (optional ``upload_id`` / ``upload_ids`` /
+    ``storage_relative_path`` / ``storage_relative_paths``).
     Multipart: form fields ``question``, optional ``conversation_id``,
-    ``include_trace``, ``upload_id``, ``storage_relative_path``, and optional
-    ``file`` (stored via BlobStore, not ingested to RAG).
+    ``include_trace``, and optional repeated ``file``, ``upload_id``, or
+    ``storage_relative_path`` fields (stored via BlobStore, not ingested to RAG).
 
-    When a file is provided, attachments (filename, storage_relative_path,
-    local_path) are passed into ``plan_and_execute`` for the planner/executor.
+    When files are provided, attachment metadata (filename, storage_relative_path,
+    local_path) is passed into ``plan_and_execute`` for the planner/executor.
     """
     _ = db
     from api.app.agent.dry_run_files import (
@@ -269,7 +282,7 @@ async def agent_dry_run(
     settings = get_settings()
 
     try:
-        question, conversation_id, include_trace, attachment = (
+        question, conversation_id, include_trace, attachments = (
             await _parse_dry_run_input(
                 request,
                 client_id=cid,
@@ -298,13 +311,16 @@ async def agent_dry_run(
         "conversation_id": conversation_id,
         "include_trace": include_trace,
     }
-    if attachment:
-        request_payload["attachment"] = {
-            "filename": attachment.get("filename"),
-            "upload_id": attachment.get("upload_id"),
-            "storage_relative_path": attachment.get("storage_relative_path"),
-            "local_path": attachment.get("local_path"),
-        }
+    if attachments:
+        request_payload["attachments"] = [
+            {
+                "filename": att.get("filename"),
+                "upload_id": att.get("upload_id"),
+                "storage_relative_path": att.get("storage_relative_path"),
+                "local_path": att.get("local_path"),
+            }
+            for att in attachments
+        ]
 
     log_dry_run_activity(
         endpoint="POST /agent/dry-run",
@@ -315,7 +331,6 @@ async def agent_dry_run(
     )
     from api.app.agent.facade import plan_and_execute
 
-    attachments = [attachment] if attachment else []
     try:
         result = plan_and_execute(
             client_id=cid,
@@ -357,24 +372,8 @@ async def agent_dry_run(
 
     workflow = result.extra.get("workflow") or "qa"
     plan_id = result.extra.get("plan_id")
-    attachment_info = None
-    if attachment:
-        attachment_info = DryRunAttachmentInfo(
-            filename=str(attachment.get("filename") or ""),
-            upload_id=(
-                str(attachment["upload_id"])
-                if attachment.get("upload_id")
-                else None
-            ),
-            storage_relative_path=str(
-                attachment.get("storage_relative_path") or ""
-            ),
-            local_path=(
-                str(attachment["local_path"])
-                if attachment.get("local_path")
-                else None
-            ),
-        )
+    attachment_infos = [_attachment_info(att) for att in attachments]
+    attachment_info = attachment_infos[0] if attachment_infos else None
     response = DryRunResponse(
         client_id=result.client_id,
         thread_id=str(plan_id or ""),
@@ -399,6 +398,7 @@ async def agent_dry_run(
             else None
         ),
         attachment=attachment_info,
+        attachments=attachment_infos,
     )
     log_dry_run_activity(
         endpoint="POST /agent/dry-run",
@@ -411,6 +411,61 @@ async def agent_dry_run(
     return response
 
 
+def _attachment_info(attachment: dict[str, Any]) -> DryRunAttachmentInfo:
+    return DryRunAttachmentInfo(
+        filename=str(attachment.get("filename") or ""),
+        upload_id=(
+            str(attachment["upload_id"]) if attachment.get("upload_id") else None
+        ),
+        storage_relative_path=str(attachment.get("storage_relative_path") or ""),
+        local_path=(
+            str(attachment["local_path"])
+            if attachment.get("local_path")
+            else None
+        ),
+    )
+
+
+async def _read_upload_attachment(
+    upload: Any,
+    *,
+    client_id: str,
+    settings: Any,
+    attachment_from_upload_bytes: Any,
+) -> dict[str, Any]:
+    data = await upload.read()  # type: ignore[union-attr]
+    if not data:
+        raise ValueError("empty file")
+    if len(data) > _MAX_DRY_RUN_UPLOAD_BYTES:
+        raise ValueError("file too large")
+    return attachment_from_upload_bytes(
+        client_id=client_id,
+        filename=getattr(upload, "filename", None) or "upload.bin",
+        data=data,
+        content_type=getattr(upload, "content_type", None),
+        settings=settings,
+    )
+
+
+def _dedupe_nonempty(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in values:
+        value = str(raw or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _enforce_attachment_limit(count: int) -> None:
+    if count > _MAX_DRY_RUN_ATTACHMENTS:
+        raise ValueError(
+            f"too many attachments (max {_MAX_DRY_RUN_ATTACHMENTS})"
+        )
+
+
 async def _parse_dry_run_input(
     request: Request,
     *,
@@ -419,10 +474,10 @@ async def _parse_dry_run_input(
     attachment_from_upload_bytes: Any,
     attachment_from_upload_id: Any,
     attachment_from_storage_relative_path: Any,
-) -> tuple[str, str | None, bool, dict[str, Any] | None]:
-    """Parse JSON or multipart dry-run input; return question + optional attachment."""
+) -> tuple[str, str | None, bool, list[dict[str, Any]]]:
+    """Parse JSON or multipart dry-run input; return question + attachments."""
     content_type = (request.headers.get("content-type") or "").lower()
-    attachment: dict[str, Any] | None = None
+    attachments: list[dict[str, Any]] = []
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -437,68 +492,95 @@ async def _parse_dry_run_input(
         )
         include_raw = str(form.get("include_trace") or "false").strip().lower()
         include_trace = include_raw in {"1", "true", "yes", "on"}
-        upload_id = form.get("upload_id")
-        upload_id = str(upload_id).strip() if upload_id not in (None, "") else None
-        storage_rel = form.get("storage_relative_path")
-        storage_rel = (
-            str(storage_rel).strip() if storage_rel not in (None, "") else None
+
+        uploads = [
+            item
+            for item in form.getlist("file")
+            if item is not None and hasattr(item, "read")
+        ]
+        upload_ids = _dedupe_nonempty([str(item) for item in form.getlist("upload_id")])
+        storage_rels = _dedupe_nonempty(
+            [str(item) for item in form.getlist("storage_relative_path")]
         )
-        upload = form.get("file")
-        has_file = upload is not None and hasattr(upload, "read")
-        if has_file and (upload_id or storage_rel):
+
+        source_kinds = sum(
+            1 for present in (uploads, upload_ids, storage_rels) if present
+        )
+        if source_kinds > 1:
             raise ValueError(
-                "provide only one of file, upload_id, or storage_relative_path"
+                "provide uploaded files, upload_id references, or "
+                "storage_relative_path references — not a mix"
             )
-        if has_file:
-            data = await upload.read()  # type: ignore[union-attr]
-            if not data:
-                raise ValueError("empty file")
-            if len(data) > _MAX_DRY_RUN_UPLOAD_BYTES:
-                raise ValueError("file too large")
-            attachment = attachment_from_upload_bytes(
-                client_id=client_id,
-                filename=getattr(upload, "filename", None) or "upload.bin",
-                data=data,
-                content_type=getattr(upload, "content_type", None),
-                settings=settings,
+
+        for upload in uploads:
+            attachments.append(
+                await _read_upload_attachment(
+                    upload,
+                    client_id=client_id,
+                    settings=settings,
+                    attachment_from_upload_bytes=attachment_from_upload_bytes,
+                )
             )
-        elif upload_id:
-            attachment = attachment_from_upload_id(
+        for upload_id in upload_ids:
+            attachments.append(
+                attachment_from_upload_id(
+                    client_id=client_id,
+                    upload_id=upload_id,
+                    settings=settings,
+                )
+            )
+        for storage_rel in storage_rels:
+            attachments.append(
+                attachment_from_storage_relative_path(
+                    client_id=client_id,
+                    storage_relative_path=storage_rel,
+                    settings=settings,
+                )
+            )
+        _enforce_attachment_limit(len(attachments))
+        return question, conversation_id, include_trace, attachments
+
+    raw = await request.json()
+    body = DryRunRequest.model_validate(raw)
+    upload_ids = _dedupe_nonempty(
+        ([body.upload_id.strip()] if body.upload_id else [])
+        + [item.strip() for item in (body.upload_ids or []) if str(item).strip()]
+    )
+    storage_rels = _dedupe_nonempty(
+        (
+            [body.storage_relative_path.strip()]
+            if body.storage_relative_path
+            else []
+        )
+        + [
+            item.strip()
+            for item in (body.storage_relative_paths or [])
+            if str(item).strip()
+        ]
+    )
+    if upload_ids and storage_rels:
+        raise ValueError(
+            "provide upload_id/upload_ids or storage_relative_path/"
+            "storage_relative_paths — not both"
+        )
+    for upload_id in upload_ids:
+        attachments.append(
+            attachment_from_upload_id(
                 client_id=client_id,
                 upload_id=upload_id,
                 settings=settings,
             )
-        elif storage_rel:
-            attachment = attachment_from_storage_relative_path(
+        )
+    for storage_rel in storage_rels:
+        attachments.append(
+            attachment_from_storage_relative_path(
                 client_id=client_id,
                 storage_relative_path=storage_rel,
                 settings=settings,
             )
-        return question, conversation_id, include_trace, attachment
-
-    raw = await request.json()
-    body = DryRunRequest.model_validate(raw)
-    sources = [
-        bool(body.upload_id),
-        bool(body.storage_relative_path),
-    ]
-    if sum(1 for s in sources if s) > 1:
-        raise ValueError(
-            "provide only one of upload_id or storage_relative_path"
         )
-    if body.upload_id:
-        attachment = attachment_from_upload_id(
-            client_id=client_id,
-            upload_id=body.upload_id.strip(),
-            settings=settings,
-        )
-    elif body.storage_relative_path:
-        attachment = attachment_from_storage_relative_path(
-            client_id=client_id,
-            storage_relative_path=body.storage_relative_path.strip(),
-            settings=settings,
-        )
-    return body.question, body.conversation_id, bool(body.include_trace), attachment
+    _enforce_attachment_limit(len(attachments))
+    return body.question, body.conversation_id, bool(body.include_trace), attachments
 
 
 def _chunk_response(raw: dict[str, Any]) -> ChunkResponse:

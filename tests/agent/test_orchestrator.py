@@ -22,14 +22,12 @@ from api.app.agent.llm import StubChatModel
 from api.app.agent.orchestrator import (
     _PLAN_SYSTEM,
     _planning_user_message,
-    _tool_catalog,
     parse_plan_steps,
 )
 from api.app.agent.guardrails import (
     PLAN_SAFETY_REFUSAL,
     find_destructive_plan_violations,
 )
-from api.app.agent.tools import ToolRef
 from api.app.agent.gather import GatheredContext
 from api.app.db.models import AgentPlan, AgentPlanStep, McpServer, Tenant, ToolRegistry, WorkflowTemplate
 from api.app.db.plan_store import get_agent_plan, list_agent_plan_steps, list_agent_plans
@@ -184,53 +182,21 @@ def _run(
     return result, model
 
 
-def test_planning_user_message_includes_tool_catalog_with_descriptions():
-    gathered = GatheredContext(question="Summarise #general")
-    catalog = _tool_catalog(
-        [
-            ToolRef(
-                name="search_knowledge",
-                source="registry",
-                kind="mcp",
-                description="Search tenant knowledge base via RAG",
-            )
-        ]
+def test_planning_user_message_is_english_goals_without_catalog():
+    gathered = GatheredContext(
+        question="Turn the spreadsheet into CSV",
+        attachments=[{"filename": "a.xlsx"}],
+        channels={},
+        channel_names=[],
+        workflow=None,
+        wants_stored_workflow=False,
+        workflow_error=None,
     )
-    message = _planning_user_message(gathered, tool_catalog=catalog)
-    assert "Shortlisted tool catalog" in message
-    assert "search_knowledge" in message
-    assert "Search tenant knowledge base via RAG" in message
-
-
-def test_tool_catalog_is_skinny_without_subcommands():
-    catalog = _tool_catalog(
-        [
-            ToolRef(
-                name="csvkit",
-                source="registry",
-                kind="cli",
-                description="CSV file operations",
-                config={
-                    "command": "in2csv",
-                    "subcommands": {
-                        "in2csv": {
-                            "purpose": "Convert Excel to CSV",
-                            "usage": "in2csv <input_file>",
-                        },
-                        "csvstat": {
-                            "purpose": "Print column statistics",
-                            "usage": "csvstat <file>",
-                        },
-                    },
-                },
-            )
-        ]
-    )
-    assert catalog[0]["name"] == "csvkit"
-    assert catalog[0]["kind"] == "cli"
-    assert catalog[0]["description"] == "CSV file operations"
-    assert "subcommands" not in catalog[0]
-    assert "config" not in catalog[0]
+    message = _planning_user_message(gathered)
+    assert "execute_goal" in message
+    assert "Shortlisted tool catalog" not in message
+    assert "tool registry" in message.lower() or "Do not use a tool registry" in message
+    assert "a.xlsx" in message
 
 
 def test_parse_plan_steps_from_json_object():
@@ -611,15 +577,14 @@ def test_plan_system_includes_deletion_guardrails():
     assert "DROP or TRUNCATE tables" in _PLAN_SYSTEM
 
 
-def test_plan_system_requires_catalog_tools_and_model_decision():
-    assert "shortlisted tool catalog" in _PLAN_SYSTEM
-    assert "never invent tool names" in _PLAN_SYSTEM
-    assert "stored workflow body is provided" in _PLAN_SYSTEM
-    assert "do not use csvkit for work it" in _PLAN_SYSTEM
+def test_plan_system_requires_english_execute_goal_steps():
+    assert "execute_goal" in _PLAN_SYSTEM
+    assert "plain English" in _PLAN_SYSTEM or "plain-English" in _PLAN_SYSTEM or "Plan in plain English" in _PLAN_SYSTEM
+    assert "tool registry" in _PLAN_SYSTEM.lower() or "Do NOT use a tool registry" in _PLAN_SYSTEM
     assert "step_type" in _PLAN_SYSTEM and "advice" in _PLAN_SYSTEM
     assert "halt" in _PLAN_SYSTEM
     assert "requires_attachment" in _PLAN_SYSTEM
-    assert "do not force mismatched tools" not in _PLAN_SYSTEM
+    assert "shortlisted tool catalog" not in _PLAN_SYSTEM
 
 
 def test_find_destructive_plan_violations_detects_delete_tool():
