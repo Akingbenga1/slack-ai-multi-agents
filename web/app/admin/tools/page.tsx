@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
 import { PlatformToolsOverviewPanel } from "@/components/tools/PlatformToolsOverviewPanel";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export default function AdminToolsPage() {
   return (
@@ -14,18 +16,29 @@ export default function AdminToolsPage() {
           { label: "Tools" },
         ]}
         actions={
-          <div className={panel.formRow}>
-            <Link href="/admin/cli-host" className={panel.btnSecondary}>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/cli-host"
+              className={cn(buttonVariants({ variant: "secondary" }))}
+            >
               CLI host
             </Link>
-            <Link href="/admin/mcp-host" className={panel.btnSecondary}>
+            <Link
+              href="/admin/mcp-host"
+              className={cn(buttonVariants({ variant: "secondary" }))}
+            >
               MCP host
             </Link>
-            <Link href="/admin/tools/new" className={panel.btnPrimary}>
+            <Link
+              href="/admin/tools/new"
+              className={cn(buttonVariants({ variant: "default" }), "rounded-full")}
+            >
+              <Plus className="h-4 w-4" />
               New tool
             </Link>
           </div>
         }
+        className="mb-8"
       />
       <PlatformToolsOverviewPanel />
     </>

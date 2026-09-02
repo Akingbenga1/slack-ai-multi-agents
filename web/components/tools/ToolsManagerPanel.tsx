@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import panel from "@/components/dashboard/panel.module.css";
-import styles from "@/components/tools/tools.module.css";
+import { Plus, Server, Trash2, Wrench } from "lucide-react";
 import {
   createMockMcpServer,
   formatToolKind,
@@ -11,24 +10,41 @@ import {
   getMockTools,
   type MockMcpServer,
   type MockTool,
-  type MockToolKind,
 } from "@/lib/mock/tools-data";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   tenantLabel?: string;
   createHref: string;
 };
 
-function kindBadgeClass(kind: MockToolKind): string {
-  if (kind === "mcp") return styles.kindMcp;
-  if (kind === "cli") return styles.kindCli;
-  if (kind === "http") return styles.kindHttp;
-  return styles.kindCode;
+const inputClassName =
+  "w-full rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
+function toolKindVariant(
+  kind: string,
+): "default" | "success" | "warning" | "muted" {
+  const value = kind.toLowerCase();
+  if (value === "mcp") return "default";
+  if (value === "cli") return "success";
+  if (value === "http") return "warning";
+  return "muted";
 }
 
 export function ToolsManagerPanel({ tenantLabel, createHref }: Props) {
   const [tools, setTools] = useState<MockTool[]>(() => getMockTools());
-  const [mcpServers, setMcpServers] = useState<MockMcpServer[]>(() => getMockMcpServers());
+  const [mcpServers, setMcpServers] = useState<MockMcpServer[]>(() =>
+    getMockMcpServers(),
+  );
   const [message, setMessage] = useState<string | null>(null);
 
   const [showMcpForm, setShowMcpForm] = useState(false);
@@ -79,215 +95,385 @@ export function ToolsManagerPanel({ tenantLabel, createHref }: Props) {
   }
 
   return (
-    <section>
-      {tenantLabel ? (
-        <p className={panel.meta} style={{ marginBottom: "1rem" }}>
-          Managing tools for <strong>{tenantLabel}</strong>.
-        </p>
-      ) : null}
-
-      <div className={panel.toolbar}>
-        <div className={panel.toolbarLeft}>
-          <Link href={createHref}>
-            <button type="button">New tool</button>
-          </Link>
-          <button type="button" onClick={() => setShowMcpForm(true)}>
-            Add MCP server
-          </button>
-        </div>
-        <p className={panel.meta}>
-          {tools.length} tool(s) · {mcpServers.length} MCP server(s)
-        </p>
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-label-md text-muted-foreground">Registered tools</p>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Wrench className="h-4 w-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-headline-md text-foreground">{tools.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-label-md text-muted-foreground">MCP servers</p>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Server className="h-4 w-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-headline-md text-foreground">
+              {mcpServers.length}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {message ? (
-        <p className={panel.infoBanner} role="status">
-          {message}
-        </p>
-      ) : null}
-
-      {showMcpForm ? (
-        <form className={styles.formPanel} onSubmit={(ev) => void onAddMcpServer(ev)}>
-          <h3 className={styles.formPanelTitle}>New MCP server</h3>
-          <div className={panel.formGrid}>
-            <label className={panel.formLabel}>
-              Server name
-              <span className={panel.formHint}>Unique per tenant — e.g. bundled, github, custom</span>
-              <input value={mcpName} onChange={(ev) => setMcpName(ev.target.value)} required />
-            </label>
-            <label className={panel.formLabel}>
-              Transport
-              <select
-                value={mcpTransport}
-                onChange={(ev) => setMcpTransport(ev.target.value as "stdio" | "http")}
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-headline-md">Tool registry</CardTitle>
+              <CardDescription className="mt-1">
+                {tenantLabel
+                  ? `CLI tools and MCP servers available to ${tenantLabel}'s agent.`
+                  : "CLI tools and MCP servers available to the agent."}
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={createHref}
+                className={cn(buttonVariants({ variant: "default" }), "rounded-full")}
               >
-                <option value="stdio">stdio (local process)</option>
-                <option value="http">http (remote server)</option>
-              </select>
-            </label>
-            {mcpTransport === "stdio" ? (
-              <label className={panel.formLabel}>
-                Launch command
-                <input
-                  value={mcpCommand}
-                  onChange={(ev) => setMcpCommand(ev.target.value)}
-                  placeholder="python -m mcp_server"
-                  required
-                />
-              </label>
-            ) : (
-              <label className={panel.formLabel}>
-                Server URL
-                <input
-                  type="url"
-                  value={mcpUrl}
-                  onChange={(ev) => setMcpUrl(ev.target.value)}
-                  placeholder="https://mcp.example.com/sse"
-                  required
-                />
-              </label>
-            )}
-            <label className={panel.checkboxRow}>
-              <input
-                type="checkbox"
-                checked={mcpEnabled}
-                onChange={(ev) => setMcpEnabled(ev.target.checked)}
-              />
-              Enabled — agent can discover tools from this server
-            </label>
-            <div className={panel.formRow}>
-              <button type="submit">Save MCP server</button>
-              <button type="button" onClick={resetMcpForm}>
-                Cancel
-              </button>
+                <Plus className="h-4 w-4" />
+                New tool
+              </Link>
+              <Button
+                type="button"
+                variant="secondary"
+                className="rounded-full"
+                onClick={() => setShowMcpForm((open) => !open)}
+              >
+                <Server className="h-4 w-4" />
+                {showMcpForm ? "Cancel MCP form" : "Add MCP server"}
+              </Button>
             </div>
           </div>
-        </form>
+        </CardHeader>
+        {message ? (
+          <CardContent className="border-b border-border pt-6">
+            <p
+              className="rounded-lg border border-success/20 bg-success-muted px-4 py-3 text-body-md text-success"
+              role="status"
+            >
+              {message}
+            </p>
+          </CardContent>
+        ) : null}
+      </Card>
+
+      {showMcpForm ? (
+        <Card>
+          <CardHeader className="border-b border-border">
+            <CardTitle className="text-headline-md">New MCP server</CardTitle>
+            <CardDescription>
+              Register a local stdio process or remote HTTP MCP endpoint before
+              adding MCP-kind tools.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <form
+              onSubmit={(ev) => void onAddMcpServer(ev)}
+              className="grid max-w-2xl gap-4"
+            >
+              <label className="block">
+                <span className="text-sm font-medium text-foreground">
+                  Server name
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  Unique per tenant — e.g. bundled, github, custom
+                </span>
+                <input
+                  value={mcpName}
+                  onChange={(ev) => setMcpName(ev.target.value)}
+                  required
+                  className={cn(inputClassName, "mt-2")}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-foreground">Transport</span>
+                <select
+                  value={mcpTransport}
+                  onChange={(ev) =>
+                    setMcpTransport(ev.target.value as "stdio" | "http")
+                  }
+                  className={cn(inputClassName, "mt-2")}
+                >
+                  <option value="stdio">stdio (local process)</option>
+                  <option value="http">http (remote server)</option>
+                </select>
+              </label>
+
+              {mcpTransport === "stdio" ? (
+                <label className="block">
+                  <span className="text-sm font-medium text-foreground">
+                    Launch command
+                  </span>
+                  <input
+                    value={mcpCommand}
+                    onChange={(ev) => setMcpCommand(ev.target.value)}
+                    placeholder="python -m mcp_server"
+                    required
+                    className={cn(inputClassName, "mt-2 font-mono text-[13px]")}
+                  />
+                </label>
+              ) : (
+                <label className="block">
+                  <span className="text-sm font-medium text-foreground">
+                    Server URL
+                  </span>
+                  <input
+                    type="url"
+                    value={mcpUrl}
+                    onChange={(ev) => setMcpUrl(ev.target.value)}
+                    placeholder="https://mcp.example.com/sse"
+                    required
+                    className={cn(inputClassName, "mt-2 font-mono text-[13px]")}
+                  />
+                </label>
+              )}
+
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={mcpEnabled}
+                  onChange={(ev) => setMcpEnabled(ev.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Enabled — agent can discover tools from this server
+              </label>
+
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" className="rounded-full">
+                  Save MCP server
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={resetMcpForm}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
       ) : null}
 
-      <section className={panel.section}>
-        <div className={panel.sectionHeader}>
-          <h2 className={panel.sectionTitle}>MCP servers</h2>
-          <span className={panel.sectionCount}>{mcpServers.length}</span>
-        </div>
-        <p className={panel.sectionDesc}>
-          Connected MCP processes or HTTP endpoints. Register a server before adding MCP-kind tools.
-        </p>
-        {mcpServers.length > 0 ? (
-          <div className={panel.tableWrap}>
-            <table className={panel.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Transport</th>
-                  <th scope="col">Connection</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {mcpServers.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      <span className={panel.tableLink}>{s.name}</span>
-                      <div className={panel.tableMuted}>
-                        <code>{s.id}</code>
-                      </div>
-                    </td>
-                    <td>{s.transport}</td>
-                    <td className={panel.tableMuted}>
-                      <code>{s.connectionSummary}</code>
-                    </td>
-                    <td>
-                      <span
-                        className={`${panel.badge} ${s.enabled ? panel.badgeOk : panel.badgeNeutral}`}
-                      >
-                        {s.enabled ? "enabled" : "disabled"}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className={`${panel.btnSm} ${panel.btnDanger}`}
-                        onClick={() => removeMcpServer(s.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-6 py-5">
+          <div>
+            <h2 className="text-headline-md text-foreground">MCP servers</h2>
+            <p className="mt-1 text-body-md text-muted-foreground">
+              Connected MCP processes or HTTP endpoints.
+            </p>
           </div>
-        ) : (
-          <p className={panel.empty}>No MCP servers yet — add one to expose MCP tools.</p>
-        )}
-      </section>
+          {mcpServers.length > 0 ? (
+            <Badge variant="muted">{mcpServers.length}</Badge>
+          ) : null}
+        </div>
+        <CardContent className="px-0 pb-0 pt-0">
+          {mcpServers.length === 0 ? (
+            <p className="px-6 py-8 text-center text-body-md text-muted-foreground">
+              No MCP servers yet — add one to expose MCP tools.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-[#f8fafc]">
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-label-md text-muted-foreground"
+                    >
+                      Name
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-label-md text-muted-foreground"
+                    >
+                      Transport
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-label-md text-muted-foreground"
+                    >
+                      Connection
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-label-md text-muted-foreground"
+                    >
+                      Status
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-right text-label-md text-muted-foreground"
+                    >
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mcpServers.map((server) => (
+                    <tr
+                      key={server.id}
+                      className="border-b border-border last:border-b-0 hover:bg-muted/40"
+                    >
+                      <td className="px-6 py-3">
+                        <p className="font-medium text-foreground">{server.name}</p>
+                        <code className="mt-1 block text-xs text-muted-foreground">
+                          {server.id}
+                        </code>
+                      </td>
+                      <td className="px-4 py-3 uppercase text-muted-foreground">
+                        {server.transport}
+                      </td>
+                      <td className="px-4 py-3">
+                        <code className="text-xs text-foreground">
+                          {server.connectionSummary}
+                        </code>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={server.enabled ? "success" : "muted"}>
+                          {server.enabled ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeMcpServer(server.id)}
+                          className="text-danger hover:text-danger"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      <section className={panel.section}>
-        <div className={panel.sectionHeader}>
-          <h2 className={panel.sectionTitle}>Registered tools</h2>
-          <span className={panel.sectionCount}>{tools.length}</span>
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-6 py-5">
+          <div>
+            <h2 className="text-headline-md text-foreground">Registered tools</h2>
+            <p className="mt-1 text-body-md text-muted-foreground">
+              Tools the orchestrator and executor can discover.
+            </p>
+          </div>
+          {tools.length > 0 ? <Badge variant="muted">{tools.length}</Badge> : null}
         </div>
-        <p className={panel.sectionDesc}>
-          Tools the orchestrator and executor can discover. Create CLI, MCP, or HTTP tools on the New
-          tool page.
-        </p>
-        {tools.length > 0 ? (
-          <div className={panel.tableWrap}>
-            <table className={panel.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">Description</th>
-                  <th scope="col">Config</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {tools.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <span className={panel.tableLink}>{t.name}</span>
-                      {t.mcpServerName ? (
-                        <div className={panel.tableMuted}>via {t.mcpServerName}</div>
-                      ) : null}
-                    </td>
-                    <td>
-                      <span className={`${panel.badge} ${kindBadgeClass(t.kind)}`}>
-                        {formatToolKind(t.kind)}
-                      </span>
-                    </td>
-                    <td className={panel.tableMuted}>{t.description || "—"}</td>
-                    <td className={panel.tableMuted}>{t.configSummary}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className={`${panel.btnSm} ${panel.btnDanger}`}
-                        onClick={() => removeTool(t.name)}
-                      >
-                        Remove
-                      </button>
-                    </td>
+        <CardContent className="px-0 pb-0 pt-0">
+          {tools.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <p className="text-body-md text-muted-foreground">
+                No tools registered yet.
+              </p>
+              <Link
+                href={createHref}
+                className={cn(
+                  buttonVariants({ variant: "default" }),
+                  "mt-4 inline-flex rounded-full",
+                )}
+              >
+                <Plus className="h-4 w-4" />
+                Create first tool
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-[#f8fafc]">
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-label-md text-muted-foreground"
+                    >
+                      Name
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-label-md text-muted-foreground"
+                    >
+                      Kind
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-label-md text-muted-foreground"
+                    >
+                      Description
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-label-md text-muted-foreground"
+                    >
+                      Config
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-right text-label-md text-muted-foreground"
+                    >
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className={panel.empty}>
-            <p style={{ margin: "0 0 0.75rem" }}>No tools registered yet.</p>
-            <Link href={createHref}>
-              <button type="button">Create first tool</button>
-            </Link>
-          </div>
-        )}
-      </section>
-    </section>
+                </thead>
+                <tbody>
+                  {tools.map((tool) => (
+                    <tr
+                      key={tool.id}
+                      className="border-b border-border last:border-b-0 hover:bg-muted/40"
+                    >
+                      <td className="px-6 py-3">
+                        <p className="font-medium text-foreground">{tool.name}</p>
+                        {tool.mcpServerName ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            via {tool.mcpServerName}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={toolKindVariant(tool.kind)}>
+                          {formatToolKind(tool.kind)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {tool.description || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-foreground">
+                        {tool.configSummary}
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeTool(tool.name)}
+                          className="text-danger hover:text-danger"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

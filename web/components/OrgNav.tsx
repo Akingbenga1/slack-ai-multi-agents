@@ -65,8 +65,8 @@ export function OrgNav() {
           {item.label}
         </Link>
       ))}
-      <Link href="/app/invite" style={LINK_STYLE}>
-        Invite
+      <Link href="/app/team" style={LINK_STYLE}>
+        Team
       </Link>
       <Link href="/">Site home</Link>
     </nav>

@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { authInputClassName } from "@/components/auth/PublicAuthShell";
 
 type Props = {
   accessToken: string | null;
@@ -21,9 +25,7 @@ type WorkflowTemplate = {
 };
 
 export function WorkflowsPanel({ accessToken, tenantId }: Props) {
-  const [items, setItems] = useState<WorkflowTemplate[] | null | undefined>(
-    undefined,
-  );
+  const [items, setItems] = useState<WorkflowTemplate[] | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [copyOwner, setCopyOwner] = useState("U_PORTAL");
@@ -77,23 +79,18 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
     setBusyId(id);
     setNote(null);
     try {
-      const draft = await apiClient.post<WorkflowTemplate>(
-        `/workflows/${id}/copy`,
-        {
-          accessToken,
-          clientId: tenantId,
-          json: {
-            owner_slack_user_id: copyOwner.trim() || "U_PORTAL",
-            title: undefined,
-          },
+      const draft = await apiClient.post<WorkflowTemplate>(`/workflows/${id}/copy`, {
+        accessToken,
+        clientId: tenantId,
+        json: {
+          owner_slack_user_id: copyOwner.trim() || "U_PORTAL",
+          title: undefined,
         },
-      );
+      });
       if (!draft) {
         throw new Error("Empty copy response");
       }
-      setNote(
-        `Copied personal draft “${draft.title}” (${draft.id}). Original unchanged.`,
-      );
+      setNote(`Copied personal draft “${draft.title}” (${draft.id}). Original unchanged.`);
       await load();
     } catch (err) {
       setNote(err instanceof Error ? err.message : String(err));
@@ -103,107 +100,130 @@ export function WorkflowsPanel({ accessToken, tenantId }: Props) {
   }
 
   return (
-    <section style={{ display: "grid", gap: "0.75rem" }}>
-      <p style={{ margin: 0, color: "#444", fontSize: "0.95rem" }}>
-        Shared workflow templates stored from Slack (TM-20 / TM-21). Copy creates
-        a personal draft without changing the original. Ask Slack to advise on a
-        template for file-grounded guidance (TM-22).
-      </p>
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-        <input
-          type="search"
-          placeholder="Search title / filename"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          style={{ minWidth: 200, padding: "0.35rem 0.5rem" }}
-        />
-        <button type="button" onClick={() => load()}>
-          Refresh
-        </button>
-      </div>
-      <label style={{ fontSize: "0.9rem" }}>
-        Copy owner Slack user id{" "}
-        <input
-          value={copyOwner}
-          onChange={(e) => setCopyOwner(e.target.value)}
-          style={{ marginLeft: "0.35rem", padding: "0.25rem 0.4rem" }}
-        />
-      </label>
-      <label style={{ fontSize: "0.9rem" }}>
-        <input
-          type="checkbox"
-          checked={includePersonal}
-          onChange={(e) => setIncludePersonal(e.target.checked)}
-          style={{ marginRight: "0.35rem" }}
-        />
-        Include personal drafts for copy owner
-      </label>
-      {items && items.length > 0 ? (
-        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--muted)" }}>
-          Showing {counts.shared} shared
-          {includePersonal ? ` · ${counts.personal} personal draft(s)` : ""}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-headline-sm">Workflow library</CardTitle>
+          <CardDescription>
+            Shared workflow templates stored from Slack. Copy creates a personal draft without
+            changing the original. Ask Slack to advise on a template for file-grounded guidance.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <input
+              type="search"
+              placeholder="Search title / filename"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className={authInputClassName + " max-w-xs"}
+            />
+            <Button type="button" variant="secondary" className="rounded-full" onClick={() => load()}>
+              Refresh
+            </Button>
+          </div>
+          <label className="block text-sm text-muted-foreground">
+            Copy owner Slack user id
+            <input
+              value={copyOwner}
+              onChange={(e) => setCopyOwner(e.target.value)}
+              className={authInputClassName + " mt-2 max-w-xs"}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includePersonal}
+              onChange={(e) => setIncludePersonal(e.target.checked)}
+              className="h-4 w-4 rounded border-border"
+            />
+            Include personal drafts for copy owner
+          </label>
+          {items && items.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Showing {counts.shared} shared
+              {includePersonal ? ` · ${counts.personal} personal draft(s)` : ""}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {error ? (
+        <p className="text-body-md text-danger" role="alert">
+          {error}
         </p>
       ) : null}
-      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
-      {note ? <p style={{ color: "#0a5" }}>{note}</p> : null}
-      {items === undefined ? <p>Loading…</p> : null}
-      {items === null && !error ? <p>Sign in to view workflows.</p> : null}
+      {note ? (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="py-4 text-body-md text-foreground">{note}</CardContent>
+        </Card>
+      ) : null}
+      {items === undefined ? (
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">Loading…</CardContent>
+        </Card>
+      ) : null}
+      {items === null && !error ? (
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">
+            Sign in to view workflows.
+          </CardContent>
+        </Card>
+      ) : null}
       {items && items.length === 0 ? (
-        <p>No shared templates yet. Store one from Slack with an attachment.</p>
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">
+            No shared templates yet. Store one from Slack with an attachment.
+          </CardContent>
+        </Card>
       ) : null}
       {items && items.length > 0 ? (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <div className="space-y-4">
           {items.map((t) => (
-            <li
-              key={t.id}
-              style={{
-                padding: "0.65rem 0",
-                borderBottom: "1px solid var(--border-subtle)",
-                display: "grid",
-                gap: "0.25rem",
-              }}
-            >
-              <strong>
-                {t.title}{" "}
-                <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>
-                  ({t.visibility === "personal" ? "personal draft" : "shared"})
-                </span>
-              </strong>
-              <code style={{ fontSize: "0.8rem" }}>{t.id}</code>
-              <span style={{ fontSize: "0.9rem", color: "#444" }}>
-                {t.original_filename}
-                {t.parent_id
-                  ? ` · copy of ${t.parent_id} (original unchanged)`
-                  : ""}{" "}
-                · v{t.version}
-                {t.owner_slack_user_id
-                  ? ` · owner ${t.owner_slack_user_id}`
-                  : ""}
-              </span>
-              {t.body_text_preview ? (
-                <span style={{ fontSize: "0.85rem", color: "var(--muted-foreground)" }}>
-                  Preview: {t.body_text_preview.slice(0, 160)}
-                  {t.body_text_preview.length > 160 ? "…" : ""}
-                </span>
-              ) : null}
-              {t.visibility === "shared" ? (
-                <button
-                  type="button"
-                  disabled={busyId === t.id}
-                  onClick={() => copyTemplate(t.id)}
-                  style={{ width: "fit-content" }}
-                >
-                  {busyId === t.id ? "Copying…" : "Copy to my draft"}
-                </button>
-              ) : (
-                <span style={{ fontSize: "0.85rem", color: "#0a5" }}>
-                  Copy status: personal draft ready to edit in Slack
-                </span>
-              )}
-            </li>
+            <Card key={t.id}>
+              <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
+                <div>
+                  <CardTitle className="text-headline-sm">{t.title}</CardTitle>
+                  <CardDescription className="mt-1">
+                    <Badge variant={t.visibility === "personal" ? "default" : "success"}>
+                      {t.visibility === "personal" ? "personal draft" : "shared"}
+                    </Badge>
+                  </CardDescription>
+                </div>
+                {t.visibility === "shared" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    disabled={busyId === t.id}
+                    onClick={() => copyTemplate(t.id)}
+                  >
+                    {busyId === t.id ? "Copying…" : "Copy to my draft"}
+                  </Button>
+                ) : null}
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <code className="block text-xs text-foreground">{t.id}</code>
+                <p>
+                  {t.original_filename}
+                  {t.parent_id ? ` · copy of ${t.parent_id} (original unchanged)` : ""} · v
+                  {t.version}
+                  {t.owner_slack_user_id ? ` · owner ${t.owner_slack_user_id}` : ""}
+                </p>
+                {t.body_text_preview ? (
+                  <p>
+                    Preview: {t.body_text_preview.slice(0, 160)}
+                    {t.body_text_preview.length > 160 ? "…" : ""}
+                  </p>
+                ) : null}
+                {t.visibility === "personal" ? (
+                  <p className="text-success">Personal draft ready to edit in Slack</p>
+                ) : null}
+              </CardContent>
+            </Card>
           ))}
-        </ul>
+        </div>
       ) : null}
-    </section>
+    </div>
   );
 }

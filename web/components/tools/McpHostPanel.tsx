@@ -1,9 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import panel from "@/components/dashboard/panel.module.css";
-import styles from "@/components/tools/tools.module.css";
+import { RefreshCw, Server } from "lucide-react";
 import { ApiError, apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   accessToken: string | null;
@@ -41,6 +50,18 @@ function errMessage(err: unknown): string {
     return err.message;
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+function readinessVariant(
+  st: HostStatus | undefined,
+  server: McpHostServer,
+): "success" | "warning" | "danger" | "muted" {
+  if (st?.busy) return "muted";
+  if (st?.ready === true) return "success";
+  if (st?.ready === false && server.enabled) return "danger";
+  if (!server.enabled && server.id !== "__bundled__") return "muted";
+  if (st?.message) return "danger";
+  return "muted";
 }
 
 export function McpHostPanel({ accessToken, tenantId }: Props) {
@@ -167,156 +188,207 @@ export function McpHostPanel({ accessToken, tenantId }: Props) {
   }
 
   if (!accessToken) {
-    return <p className={panel.empty}>Sign in to check MCP server readiness.</p>;
-  }
-  if (servers === undefined) {
-    return <p className={panel.meta}>Loading MCP servers…</p>;
-  }
-  if (error) {
-    return <p className={panel.error}>{error}</p>;
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-body-md text-muted-foreground">
+          Sign in to check MCP server readiness.
+        </CardContent>
+      </Card>
+    );
   }
 
-  const rows = bundled ? [bundled, ...(servers ?? [])] : (servers ?? []);
-  if (rows.length === 0) {
+  if (servers === undefined) {
     return (
-      <p className={panel.empty}>
-        No MCP servers registered yet. Create an MCP tool under Tools, then return here to verify
-        the server is reachable.
+      <Card>
+        <CardContent className="space-y-2 py-8">
+          {Array.from({ length: 4 }, (_, key) => (
+            <div key={key} className="h-10 animate-pulse rounded-lg bg-muted" />
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <p className="rounded-lg border border-danger-muted bg-danger-muted/40 px-4 py-3 text-body-md text-danger" role="alert">
+        {error}
       </p>
     );
   }
 
+  const rows = bundled ? [bundled, ...(servers ?? [])] : (servers ?? []);
+
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-body-md text-muted-foreground">
+          No MCP servers registered yet. Create an MCP tool under Tools, then return here to verify
+          the server is reachable.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <section>
-      <div className={panel.toolbar}>
-        <div className={panel.toolbarLeft}>
-          <button
-            type="button"
-            disabled={checkingAll}
-            onClick={() => {
-              setNote(null);
-              void load();
-            }}
-          >
-            {checkingAll ? "Checking…" : "Refresh"}
-          </button>
-        </div>
-        <p className={panel.meta}>
-          {servers?.length ?? 0} registered server(s)
-          {checkingAll ? " · checking…" : ""}
-        </p>
-      </div>
-
-      <p className={panel.infoBanner} role="note">
-        Status is checked when this page loads. Ready means this host can initialize the MCP
-        session and list tools (from connection_config URL or stdio command).
-      </p>
-
-      {note ? (
-        <p className={panel.infoBanner} role="status">
-          {note}
-        </p>
-      ) : null}
-
-      <div className={panel.tableWrap}>
-        <table className={panel.table}>
-          <thead>
-            <tr>
-              <th>Server</th>
-              <th>Transport</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((server) => {
-              const st = statusByName[server.name];
-              const busy = st?.busy;
-              let statusLabel = "Checking…";
-              let statusClass = panel.tableMuted;
-              if (busy === "check") statusLabel = "Checking…";
-              else if (busy === "toggle") statusLabel = "Updating…";
-              else if (st?.ready === true) {
-                statusLabel =
-                  typeof st.toolCount === "number"
-                    ? `Ready · ${st.toolCount} tool(s)`
-                    : "Ready";
-                statusClass = styles.hostOk;
-              } else if (st?.ready === false) {
-                statusLabel = server.enabled ? "Not ready" : "Disabled";
-                statusClass = styles.hostMissing;
-              } else if (st?.message) {
-                statusLabel = "Check failed";
-                statusClass = styles.hostMissing;
-              }
-              return (
-                <tr key={server.id}>
-                  <td>
-                    <div className={styles.hostToolName}>{server.name}</div>
-                    {server.endpoint_hint ? (
-                      <div className={panel.tableMuted}>
-                        <code>{server.endpoint_hint}</code>
-                      </div>
-                    ) : (
-                      <div className={styles.hostSpecHintMuted}>
-                        No endpoint in connection config
-                      </div>
-                    )}
-                    {server.linked_tools.length > 0 ? (
-                      <div className={styles.hostSpecHint}>
-                        Tools: {server.linked_tools.join(", ")}
-                      </div>
-                    ) : server.id === "__bundled__" ? (
-                      <div className={styles.hostSpecHint}>Platform bundled MCP</div>
-                    ) : (
-                      <div className={styles.hostSpecHintMuted}>No linked registry tools</div>
-                    )}
-                  </td>
-                  <td>
-                    <code>{server.transport}</code>
-                    {!server.enabled && server.id !== "__bundled__" ? (
-                      <div className={panel.tableMuted}>disabled</div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <span className={statusClass}>{statusLabel}</span>
-                    {st?.message && st.ready !== true ? (
-                      <div className={styles.hostMsg}>{st.message}</div>
-                    ) : null}
-                    {st?.detail && st.ready !== true ? (
-                      <div className={styles.hostMsg}>{st.detail}</div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <div className={styles.hostActions}>
-                      <button
-                        type="button"
-                        disabled={Boolean(busy)}
-                        onClick={() => void checkOne(server)}
-                      >
-                        {busy === "check" ? "Checking…" : "Check"}
-                      </button>
-                      {server.id !== "__bundled__" ? (
-                        <button
-                          type="button"
-                          disabled={Boolean(busy)}
-                          onClick={() => void onToggleEnabled(server)}
-                        >
-                          {busy === "toggle"
-                            ? "Updating…"
-                            : server.enabled
-                              ? "Disable"
-                              : "Enable"}
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Server className="h-5 w-5" />
+              </span>
+              <div>
+                <CardTitle className="text-headline-md">MCP servers</CardTitle>
+                <CardDescription className="mt-1">
+                  {servers?.length ?? 0} registered server(s)
+                  {checkingAll ? " · checking…" : ""}. Ready means this host can initialize the
+                  MCP session and list tools.
+                </CardDescription>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-full"
+              disabled={checkingAll}
+              onClick={() => {
+                setNote(null);
+                void load();
+              }}
+            >
+              <RefreshCw className={cn("h-4 w-4", checkingAll && "animate-spin")} />
+              {checkingAll ? "Checking…" : "Refresh"}
+            </Button>
+          </div>
+        </CardHeader>
+        {note ? (
+          <CardContent className="border-b border-border pt-6">
+            <p
+              className="rounded-lg border border-success/20 bg-success-muted px-4 py-3 text-body-md text-success"
+              role="status"
+            >
+              {note}
+            </p>
+          </CardContent>
+        ) : null}
+        <CardContent className="px-0 pb-0 pt-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-[#f8fafc]">
+                  <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                    Server
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-label-md text-muted-foreground">
+                    Transport
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-label-md text-muted-foreground">
+                    Status
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-right text-label-md text-muted-foreground">
+                    Actions
+                  </th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
+              </thead>
+              <tbody>
+                {rows.map((server) => {
+                  const st = statusByName[server.name];
+                  const busy = st?.busy;
+                  let statusLabel = "Checking…";
+                  if (busy === "check") statusLabel = "Checking…";
+                  else if (busy === "toggle") statusLabel = "Updating…";
+                  else if (st?.ready === true) {
+                    statusLabel =
+                      typeof st.toolCount === "number"
+                        ? `Ready · ${st.toolCount} tool(s)`
+                        : "Ready";
+                  } else if (st?.ready === false) {
+                    statusLabel = server.enabled ? "Not ready" : "Disabled";
+                  } else if (st?.message) {
+                    statusLabel = "Check failed";
+                  }
+                  return (
+                    <tr
+                      key={server.id}
+                      className="border-b border-border last:border-b-0 align-top hover:bg-muted/40"
+                    >
+                      <td className="px-6 py-3">
+                        <p className="font-medium text-foreground">{server.name}</p>
+                        {server.endpoint_hint ? (
+                          <code className="mt-1 block text-xs text-muted-foreground">
+                            {server.endpoint_hint}
+                          </code>
+                        ) : (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            No endpoint in connection config
+                          </p>
+                        )}
+                        {server.linked_tools.length > 0 ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Tools: {server.linked_tools.join(", ")}
+                          </p>
+                        ) : server.id === "__bundled__" ? (
+                          <p className="mt-1 text-xs text-muted-foreground">Platform bundled MCP</p>
+                        ) : (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            No linked registry tools
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <code className="text-xs uppercase text-foreground">{server.transport}</code>
+                        {!server.enabled && server.id !== "__bundled__" ? (
+                          <p className="mt-1 text-xs text-muted-foreground">disabled</p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={readinessVariant(st, server)}>{statusLabel}</Badge>
+                        {st?.message && st.ready !== true ? (
+                          <p className="mt-2 text-xs text-danger">{st.message}</p>
+                        ) : null}
+                        {st?.detail && st.ready !== true ? (
+                          <p className="mt-1 text-xs text-muted-foreground">{st.detail}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={Boolean(busy)}
+                            onClick={() => void checkOne(server)}
+                          >
+                            {busy === "check" ? "Checking…" : "Check"}
+                          </Button>
+                          {server.id !== "__bundled__" ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={Boolean(busy)}
+                              onClick={() => void onToggleEnabled(server)}
+                            >
+                              {busy === "toggle"
+                                ? "Updating…"
+                                : server.enabled
+                                  ? "Disable"
+                                  : "Enable"}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

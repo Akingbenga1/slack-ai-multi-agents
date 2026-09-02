@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Activity, RefreshCw, Server } from "lucide-react";
 import { apiClient } from "@/lib/api";
-import styles from "./PlatformHealthPanel.module.css";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   accessToken: string | null;
@@ -32,6 +36,9 @@ const WINDOW_OPTIONS = [
   { value: 72, label: "Last 72 hours" },
 ] as const;
 
+const selectClassName =
+  "rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
 function labelForService(name: string): string {
   const labels: Record<string, string> = {
     postgres: "PostgreSQL",
@@ -43,27 +50,28 @@ function labelForService(name: string): string {
 }
 
 function statusBannerClass(status: string): string {
-  if (status === "ok") return styles.statusBannerOk;
-  if (status === "degraded") return styles.statusBannerDegraded;
-  return styles.statusBannerDown;
+  if (status === "ok") return "border-success/35 bg-success-muted/40";
+  if (status === "degraded") return "border-warning/35 bg-warning-muted/40";
+  return "border-danger/35 bg-danger-muted/40";
 }
 
 function statusDotClass(status: string): string {
-  if (status === "ok") return styles.statusDotOk;
-  if (status === "degraded") return styles.statusDotDegraded;
-  return styles.statusDotDown;
+  if (status === "ok") return "bg-success shadow-[0_0_0_4px_rgba(34,197,94,0.2)]";
+  if (status === "degraded") return "bg-warning shadow-[0_0_0_4px_rgba(234,179,8,0.2)]";
+  return "bg-danger shadow-[0_0_0_4px_rgba(239,68,68,0.2)]";
 }
 
-function failureRateClass(rate: number): string {
-  if (rate === 0) return styles.metricValueGood;
-  if (rate < 0.05) return styles.metricValueWarn;
-  return styles.metricValueBad;
+function failureRateTextClass(rate: number): string {
+  if (rate === 0) return "text-success";
+  if (rate < 0.05) return "text-warning";
+  return "text-danger";
 }
 
-function barClass(rate: number): string {
-  if (rate === 0) return styles.barFill;
-  if (rate < 0.05) return `${styles.barFill} ${styles.barFillWarn}`;
-  return `${styles.barFill} ${styles.barFillBad}`;
+function barFillClass(rate: number, bad = false): string {
+  if (bad) return "bg-danger";
+  if (rate === 0) return "bg-primary";
+  if (rate < 0.05) return "bg-warning";
+  return "bg-danger";
 }
 
 function formatWhen(iso?: string): string | null {
@@ -120,70 +128,88 @@ export function PlatformHealthPanel({ accessToken }: Props) {
   const failurePct = ((data?.errors?.failure_rate ?? 0) * 100).toFixed(1);
 
   return (
-    <section aria-busy={loading}>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarLeft}>
-          <label htmlFor="health-window" className="sr-only">
-            Time window
-          </label>
-          <select
-            id="health-window"
-            className={styles.windowSelect}
-            value={hours}
-            onChange={(e) => setHours(Number(e.target.value))}
-            disabled={loading}
-          >
-            {WINDOW_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={() => void load()} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
-        {fetchedAt ? (
-          <p className={styles.meta}>Updated {fetchedAt.toLocaleTimeString()}</p>
-        ) : null}
-      </div>
+    <section aria-busy={loading} className="space-y-6">
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="health-window" className="sr-only">
+              Time window
+            </label>
+            <select
+              id="health-window"
+              className={selectClassName}
+              value={hours}
+              onChange={(e) => setHours(Number(e.target.value))}
+              disabled={loading}
+            >
+              {WINDOW_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-full"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+          </div>
+          {fetchedAt ? (
+            <p className="text-sm text-muted-foreground">
+              Updated {fetchedAt.toLocaleTimeString()}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {error ? (
-        <p className={styles.error} role="alert">
+        <p
+          className="rounded-lg border border-danger-muted bg-danger-muted/40 px-4 py-3 text-body-md text-danger"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
 
       {loading && !data ? (
-        <>
-          <div className={`${styles.skeleton} ${styles.skeletonBanner}`} />
-          <div className={styles.metrics}>
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className={`${styles.skeleton} ${styles.skeletonMetric}`} />
+        <div className="space-y-4">
+          <div className="h-20 animate-pulse rounded-xl bg-muted" />
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="h-24 animate-pulse rounded-xl bg-muted" />
             ))}
           </div>
-          <div className={styles.grid}>
-            <div className={`${styles.skeleton} ${styles.skeletonSection}`} />
-            <div className={`${styles.skeleton} ${styles.skeletonSection}`} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="h-48 animate-pulse rounded-xl bg-muted" />
+            <div className="h-48 animate-pulse rounded-xl bg-muted" />
           </div>
-        </>
+        </div>
       ) : null}
 
       {data ? (
         <>
           <div
-            className={`${styles.statusBanner} ${statusBannerClass(data.status)}`}
+            className={cn(
+              "flex items-start gap-4 rounded-xl border p-5",
+              statusBannerClass(data.status),
+            )}
             role="status"
           >
             <span
-              className={`${styles.statusDot} ${statusDotClass(data.status)}`}
+              className={cn("mt-1 h-3 w-3 shrink-0 rounded-full", statusDotClass(data.status))}
               aria-hidden="true"
             />
             <div>
-              <p className={styles.statusTitle}>
+              <p className="text-headline-md text-foreground">
                 Platform {data.status === "ok" ? "healthy" : data.status}
               </p>
-              <p className={styles.statusText}>
+              <p className="mt-1 text-sm text-muted-foreground">
                 {data.status === "ok"
                   ? "All Compose dependency probes are responding."
                   : "One or more infrastructure checks reported errors — review services below."}
@@ -194,162 +220,202 @@ export function PlatformHealthPanel({ accessToken }: Props) {
             </div>
           </div>
 
-          <div className={styles.metrics}>
-            <div className={styles.metric}>
-              <p className={styles.metricLabel}>Services up</p>
-              <p className={styles.metricValue}>
-                {servicesUp}/{checks.length || "—"}
-              </p>
-              <p className={styles.metricSub}>Compose probes</p>
-            </div>
-            <div className={styles.metric}>
-              <p className={styles.metricLabel}>Jobs run</p>
-              <p className={styles.metricValue}>{data.errors?.jobs_total ?? 0}</p>
-              <p className={styles.metricSub}>{hours}h window</p>
-            </div>
-            <div className={styles.metric}>
-              <p className={styles.metricLabel}>Jobs failed</p>
-              <p
-                className={`${styles.metricValue} ${
-                  (data.errors?.jobs_failed ?? 0) > 0 ? styles.metricValueBad : styles.metricValueGood
-                }`}
-              >
-                {data.errors?.jobs_failed ?? 0}
-              </p>
-              <p className={styles.metricSub}>Across all tenants</p>
-            </div>
-            <div className={styles.metric}>
-              <p className={styles.metricLabel}>Failure rate</p>
-              <p className={`${styles.metricValue} ${failureRateClass(data.errors?.failure_rate ?? 0)}`}>
-                {failurePct}%
-              </p>
-              <div className={styles.barTrack} aria-hidden="true">
-                <div
-                  className={barClass(data.errors?.failure_rate ?? 0)}
-                  style={{ width: `${Math.min(100, Number(failurePct))}%` }}
-                />
-              </div>
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-label-md text-muted-foreground">Services up</p>
+                <p className="mt-2 text-headline-md text-foreground">
+                  {servicesUp}/{checks.length || "—"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Compose probes</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-label-md text-muted-foreground">Jobs run</p>
+                <p className="mt-2 text-headline-md text-foreground">
+                  {data.errors?.jobs_total ?? 0}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">{hours}h window</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-label-md text-muted-foreground">Jobs failed</p>
+                <p
+                  className={cn(
+                    "mt-2 text-headline-md",
+                    (data.errors?.jobs_failed ?? 0) > 0 ? "text-danger" : "text-success",
+                  )}
+                >
+                  {data.errors?.jobs_failed ?? 0}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Across all tenants</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-label-md text-muted-foreground">Failure rate</p>
+                <p
+                  className={cn(
+                    "mt-2 text-headline-md",
+                    failureRateTextClass(data.errors?.failure_rate ?? 0),
+                  )}
+                >
+                  {failurePct}%
+                </p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      "h-full rounded-full",
+                      barFillClass(data.errors?.failure_rate ?? 0),
+                    )}
+                    style={{ width: `${Math.min(100, Number(failurePct))}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
-          <div className={styles.grid}>
-            <section className={styles.section} aria-labelledby="health-services-heading">
-              <div className={styles.sectionHeader}>
-                <h2 id="health-services-heading" className={styles.sectionTitle}>
-                  Compose services
-                </h2>
-                <span className={styles.sectionCount}>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-5">
+                <div className="flex items-center gap-2">
+                  <Server className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-headline-md text-foreground">Compose services</h2>
+                </div>
+                <Badge variant="muted">
                   {servicesUp}/{checks.length} ok
-                </span>
+                </Badge>
               </div>
-              {checks.length > 0 ? (
-                <div className={styles.services}>
-                  {checks.map(([name, check]) => (
-                    <div key={name} className={styles.serviceRow}>
+              <CardContent className="space-y-2 pt-6">
+                {checks.length > 0 ? (
+                  checks.map(([name, check]) => (
+                    <div
+                      key={name}
+                      className="flex items-start justify-between gap-3 rounded-lg border border-border bg-[#f8fafc] px-4 py-3"
+                    >
                       <div>
-                        <p className={styles.serviceName}>{labelForService(name)}</p>
+                        <p className="text-sm font-semibold text-foreground">
+                          {labelForService(name)}
+                        </p>
                         {check.adapter ? (
-                          <p className={styles.serviceDetail}>Adapter: {check.adapter}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Adapter: {check.adapter}
+                          </p>
                         ) : null}
                         {check.detail ? (
-                          <p className={styles.serviceDetail}>{check.detail}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{check.detail}</p>
                         ) : null}
                       </div>
-                      <span
-                        className={`${styles.badge} ${
-                          check.status === "ok" ? styles.badgeOk : styles.badgeError
-                        }`}
-                      >
+                      <Badge variant={check.status === "ok" ? "success" : "danger"}>
                         {check.status}
-                      </span>
+                      </Badge>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className={styles.empty}>No service probes returned.</p>
-              )}
-            </section>
+                  ))
+                ) : (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    No service probes returned.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-            <section className={styles.section} aria-labelledby="health-failures-heading">
-              <div className={styles.sectionHeader}>
-                <h2 id="health-failures-heading" className={styles.sectionTitle}>
-                  Failed jobs by kind
-                </h2>
-                <span className={styles.sectionCount}>{failedKinds.length} kinds</span>
+            <Card>
+              <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-5">
+                <h2 className="text-headline-md text-foreground">Failed jobs by kind</h2>
+                <Badge variant="muted">{failedKinds.length} kinds</Badge>
               </div>
-              {failedKinds.length > 0 ? (
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th scope="col">Job kind</th>
-                        <th scope="col">Count</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {failedKinds.map((row) => (
-                        <tr key={row.kind}>
-                          <td>{row.kind}</td>
-                          <td>
-                            <span className={styles.tableCount}>{row.count}</span>
-                            <div className={styles.barTrack} aria-hidden="true">
-                              <div
-                                className={styles.barFillBad}
-                                style={{ width: `${(row.count / maxFailed) * 100}%` }}
-                              />
-                            </div>
-                          </td>
+              <CardContent className="px-0 pb-0 pt-0">
+                {failedKinds.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-[#f8fafc]">
+                          <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                            Job kind
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                            Count
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className={styles.empty}>No failed jobs in this window.</p>
-              )}
-            </section>
+                      </thead>
+                      <tbody>
+                        {failedKinds.map((row) => (
+                          <tr key={row.kind} className="border-b border-border last:border-b-0">
+                            <td className="px-6 py-3 text-foreground">{row.kind}</td>
+                            <td className="px-6 py-3">
+                              <span className="font-semibold tabular-nums">{row.count}</span>
+                              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-danger"
+                                  style={{ width: `${(row.count / maxFailed) * 100}%` }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="px-6 py-8 text-center text-sm text-muted-foreground">
+                    No failed jobs in this window.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-            <section
-              className={`${styles.section} ${styles.sectionFull}`}
-              aria-labelledby="health-usage-heading"
-            >
-              <div className={styles.sectionHeader}>
-                <h2 id="health-usage-heading" className={styles.sectionTitle}>
-                  Usage events
-                </h2>
-                <span className={styles.sectionCount}>{usageRows.length} types</span>
-              </div>
-              {usageRows.length > 0 ? (
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th scope="col">Event type</th>
-                        <th scope="col">Count</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usageRows.map((row) => (
-                        <tr key={row.event_type}>
-                          <td>{row.event_type}</td>
-                          <td>
-                            <span className={styles.tableCount}>{row.count}</span>
-                            <div className={styles.barTrack} aria-hidden="true">
-                              <div
-                                className={styles.barFill}
-                                style={{ width: `${(row.count / maxUsage) * 100}%` }}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <Card className="lg:col-span-2">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-5">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-headline-md text-foreground">Usage events</h2>
                 </div>
-              ) : (
-                <p className={styles.empty}>No usage events recorded in this window.</p>
-              )}
-            </section>
+                <Badge variant="muted">{usageRows.length} types</Badge>
+              </div>
+              <CardContent className="px-0 pb-0 pt-0">
+                {usageRows.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-[#f8fafc]">
+                          <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                            Event type
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                            Count
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {usageRows.map((row) => (
+                          <tr
+                            key={row.event_type}
+                            className="border-b border-border last:border-b-0"
+                          >
+                            <td className="px-6 py-3 text-foreground">{row.event_type}</td>
+                            <td className="px-6 py-3">
+                              <span className="font-semibold tabular-nums">{row.count}</span>
+                              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-primary"
+                                  style={{ width: `${(row.count / maxUsage) * 100}%` }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="px-6 py-8 text-center text-sm text-muted-foreground">
+                    No usage events recorded in this window.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </>
       ) : null}

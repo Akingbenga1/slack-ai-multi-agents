@@ -1,8 +1,17 @@
 # Slack app setup checklist
 
-Platform Slack app (one app, many workspaces via install store). Laptop-as-VPS + tunnel.
+Platform Slack app (one app, many workspaces via install store).
 
 Related: `docs/tunnel-plan.md`
+
+## Event transport (choose one)
+
+| Mode | Env | Slack app | Public tunnel for events? |
+| ---- | --- | --------- | ------------------------- |
+| **HTTP Events** (default) | `SLACK_EVENTS_TRANSPORT=http` | Event Subscriptions → Request URL | Yes — `{PUBLIC_BASE_URL}/slack/events` |
+| **Socket Mode** | `SLACK_EVENTS_TRANSPORT=socket` + `SLACK_APP_TOKEN=xapp-…` | Socket Mode → Enable | No — API opens outbound WebSocket |
+
+OAuth install still needs a reachable `{PUBLIC_BASE_URL}/slack/oauth/callback` (tunnel or deployed host) in both modes.
 
 ## 1. Create the app
 
@@ -12,8 +21,11 @@ Related: `docs/tunnel-plan.md`
    - **Client ID** → `SLACK_CLIENT_ID`
    - **Client Secret** → `SLACK_CLIENT_SECRET`
    - **Signing Secret** (Basic Information) → `SLACK_SIGNING_SECRET`
+   - **Socket Mode only:** App-Level Token (`connections:write`) → `SLACK_APP_TOKEN`
 
-## 2. Public base URL (tunnel)
+## 2. Public base URL (HTTP Events + OAuth)
+
+Skip the events tunnel when using Socket Mode; OAuth callback still needs a public URL unless you seed `DEMO_SLACK_*` tokens locally.
 
 ```bash
 # API on :8000
@@ -29,16 +41,36 @@ PUBLIC_BASE_URL=https://<your-tunnel-host>
 
 Restart uvicorn after changing env (or avoid cached settings in long-lived process).
 
+### Socket Mode env (no events tunnel)
+
+```
+SLACK_EVENTS_TRANSPORT=socket
+SLACK_APP_TOKEN=xapp-1-…
+```
+
+Enable **Socket Mode** in the Slack app settings and create an app-level token with `connections:write`. Restart the API — the listener starts automatically on boot.
+
 ## 3. Event Subscriptions
+
+### HTTP Events (`SLACK_EVENTS_TRANSPORT=http`)
 
 | Setting | Value |
 | ------- | ----- |
 | Enable Events | On |
 | Request URL | `{PUBLIC_BASE_URL}/slack/events` |
 
-Slack sends a `url_verification` challenge; the API must respond with the `challenge` string (Task 4.2).
+Slack sends a `url_verification` challenge; the API responds with the `challenge` string.
 
-### Subscribe to bot events
+### Socket Mode (`SLACK_EVENTS_TRANSPORT=socket`)
+
+| Setting | Value |
+| ------- | ----- |
+| Socket Mode | On |
+| Event Subscriptions | On (no Request URL required) |
+
+When Socket Mode is active, `POST /slack/events` still answers `url_verification` but skips event processing to avoid duplicate replies.
+
+### Subscribe to bot events (both modes)
 
 | Event | Why |
 | ----- | --- |
@@ -92,7 +124,7 @@ Status API: `GET /slack/connection` (JWT) returns connected flag, team, and `ins
 ## 5. App Home / Display (optional)
 
 - Display name + icon for teammate feel.
-- **Socket Mode: Off** (we use HTTP Events).
+- **Socket Mode:** enable only when `SLACK_EVENTS_TRANSPORT=socket`.
 
 ## 6. Private channels (client ops)
 
@@ -109,9 +141,9 @@ Not automated in MVP — org admins / teammates must invite the bot per private 
 ## 7. Verify (grounded replies — Sprint 14)
 
 1. `docker compose up -d` + `uv run uvicorn api.app.main:app --port 8000`
-2. Tunnel → `PUBLIC_BASE_URL`
-3. Paste Events URL → Slack shows **Verified**
-4. Install via `/slack/install?tenant_id=…` → row in `slack_installs`
+2. **HTTP:** tunnel → `PUBLIC_BASE_URL` → paste Events URL → Slack shows **Verified**
+3. **Socket:** set `SLACK_EVENTS_TRANSPORT=socket` + `SLACK_APP_TOKEN`, enable Socket Mode in Slack app, restart API
+4. Install via portal **Connect Slack** (or `/slack/install?state=…`) → row in `slack_installs`
 5. Ensure the tenant has an **active** plan (`billing_customers.plan_status=active` with `agent` entitlement) — Stripe Checkout webhook, or local activate via billing helpers
 6. Sync/upload knowledge for that tenant (Qdrant + TEI)
 7. @mention in a channel (or DM the bot) → grounded answer (+ `*Sources:*` when evidence exists)
@@ -120,4 +152,4 @@ Not automated in MVP — org admins / teammates must invite the bot per private 
 
 ## Needs human
 
-Operator must create the Slack app and paste secrets into `.env` (never commit). Free tunnel URLs change on restart — update Slack Request URL + Redirect URL + `PUBLIC_BASE_URL`. Live mention/DM Q&A also needs an active billing plan for the mapped tenant.
+Operator must create the Slack app and paste secrets into `.env` (never commit). **HTTP Events:** free tunnel URLs change on restart — update Slack Request URL + Redirect URL + `PUBLIC_BASE_URL`. **Socket Mode:** no events tunnel, but OAuth callback URL still needs to be reachable unless using demo token seed. Live mention/DM Q&A also needs an active billing plan for the mapped tenant.

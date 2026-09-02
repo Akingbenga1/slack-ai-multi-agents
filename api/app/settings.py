@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from api.app.constants import DEFAULT_JWT_SECRET
 
 AppEnv = Literal["development", "staging", "production"]
+SlackEventsTransport = Literal["http", "socket"]
 
 
 class Settings(BaseSettings):
@@ -62,10 +63,15 @@ class Settings(BaseSettings):
     # Relative paths resolve from process cwd (repo root)
     upload_dir: str = "data/uploads"
 
-    # LLM / agent (Sprint 13+; Sprint 33 provider factory)
-    # anthropic | ollama | stub — offline/tests use stub (not empty Anthropic key)
-    llm_provider: Literal["anthropic", "ollama", "stub"] = "anthropic"
-    # Anthropic-adapter secrets (names kept for existing deploys)
+    # LLM / agent — role-named config (provider id validated in llm_config registry)
+    # Registered ids: stub | anthropic | ollama | openai_compat
+    llm_provider: str = "anthropic"
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model_fast: str = ""
+    llm_model_capable: str = ""
+    llm_max_tokens: int = 0
+    # Legacy adapter secrets (aliases; prefer LLM_* vars above)
     anthropic_api_key: str = ""
     anthropic_model_haiku: str = "claude-3-5-haiku-latest"
     anthropic_model_sonnet: str = "claude-sonnet-4-20250514"
@@ -103,6 +109,10 @@ class Settings(BaseSettings):
     slack_client_id: str = ""
     slack_client_secret: str = ""
     slack_signing_secret: str = ""
+    # Event transport: http (Events API + tunnel) | socket (Socket Mode, no events tunnel)
+    slack_events_transport: SlackEventsTransport = "http"
+    # App-level token (xapp-…) — required when slack_events_transport=socket
+    slack_app_token: str = ""
     # Sprint 9.4 — Beat interval for live history sync dispatcher (seconds)
     slack_history_sync_interval_seconds: float = 3600.0
     # Bound in-memory backlog while syncing a channel (messages per ingest batch)
@@ -173,6 +183,13 @@ class Settings(BaseSettings):
         if self.allow_plan_waivers is not None:
             return self.allow_plan_waivers
         return self.app_env == "development"
+
+    def slack_socket_mode_enabled(self) -> bool:
+        """True when Socket Mode transport is selected and app token is set."""
+        return (
+            self.slack_events_transport == "socket"
+            and bool((self.slack_app_token or "").strip())
+        )
 
     @property
     def upload_dir_path(self):

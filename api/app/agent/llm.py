@@ -1,10 +1,8 @@
 """Chat model Strategy + LLM provider Factory (Sprint 13 / 33 / 43).
 
 Compose and the graph know only ``ChatModel.complete`` and generic tiers
-(``fast`` / ``capable``). Vendor SDKs and model ids live in adapters;
-``get_chat_model`` selects by ``LLM_PROVIDER``. Optional tool schemas may be
-passed in; adapters return text or structured ``ToolCall`` values and never
-execute those tools.
+(``fast`` / ``capable``). Connection details resolve via ``llm_config``;
+adapters implement API shapes. ``get_chat_model`` selects by provider registry.
 """
 
 from __future__ import annotations
@@ -18,6 +16,14 @@ import httpx
 from api.app.agent.state import ModelTier
 from api.app.http_retry import call_with_retries, is_transient_http_status
 from api.app.logging_config import get_logger, log_agent_prompts
+from api.app.agent.llm_config import (
+    ADAPTER_SHAPE_ANTHROPIC,
+    ADAPTER_SHAPE_OPENAI_COMPAT,
+    ADAPTER_SHAPE_STUB,
+    LlmRuntimeConfig,
+    registered_provider_ids,
+    resolve_llm_runtime_config,
+)
 from api.app.settings import Settings, get_settings
 
 logger = get_logger("api.agent.llm")
@@ -161,33 +167,35 @@ class StubChatModel:
 
 
 class AnthropicChatModel:
-    """Anthropic Messages API adapter — maps ``fast``/``capable`` → vendor model ids."""
+    """Native Messages API adapter — maps ``fast``/``capable`` → model ids."""
 
     def __init__(
         self,
         settings: Settings | None = None,
         *,
+        config: LlmRuntimeConfig | None = None,
         max_retries: int = 3,
         client: Any | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        self._config = config or resolve_llm_runtime_config(self.settings)
         if client is not None:
             self._client = client
             return
-        key = (self.settings.anthropic_api_key or "").strip()
+        key = (self._config.api_key or "").strip()
         if not key:
             raise ValueError(
-                "ANTHROPIC_API_KEY is empty; set the key or use LLM_PROVIDER=stub"
+                "LLM API key is empty; set LLM_API_KEY or use LLM_PROVIDER=stub"
             )
-        # Lazy import so stub/Ollama paths do not need the Anthropic SDK loaded.
+        # Lazy import so stub / OpenAI-compat paths do not need the Anthropic SDK.
         import anthropic
 
         self._client = anthropic.Anthropic(api_key=key, max_retries=max_retries)
 
     def _model_id(self, tier: ModelTier) -> str:
         if tier == "capable":
-            return self.settings.anthropic_model_sonnet
-        return self.settings.anthropic_model_haiku
+            return self._config.model_capable
+        return self._config.model_fast
 
     def complete(
         self,
@@ -207,7 +215,7 @@ class AnthropicChatModel:
             "max_tokens": (
                 max_tokens
                 if max_tokens is not None
-                else self.settings.anthropic_max_tokens
+                else self._config.max_tokens
             ),
             "system": system,
             "messages": [
@@ -231,28 +239,37 @@ class AnthropicChatModel:
         )
 
 
-class OllamaChatModel:
-    """Ollama / OpenAI-compatible chat completions adapter (HTTP)."""
+class OpenAICompatChatModel:
+    """OpenAI-compatible ``/v1/chat/completions`` adapter (HTTP)."""
 
     def __init__(
         self,
         settings: Settings | None = None,
         *,
+        config: LlmRuntimeConfig | None = None,
         max_retries: int = 3,
         http_client: httpx.Client | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        base = (self.settings.ollama_url or "").strip().rstrip("/")
+        self._config = config or resolve_llm_runtime_config(self.settings)
+        base = (self._config.base_url or "").strip().rstrip("/")
         if not base:
-            raise ValueError("OLLAMA_URL is empty")
+            raise ValueError("LLM base URL is empty; set LLM_BASE_URL")
         self.base_url = base
         self.max_retries = max_retries
         self._http_client = http_client
 
     def _model_id(self, tier: ModelTier) -> str:
         if tier == "capable":
-            return self.settings.ollama_model_capable
-        return self.settings.ollama_model_fast
+            return self._config.model_capable
+        return self._config.model_fast
+
+    def _request_headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        key = (self._config.api_key or "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
 
     def complete(
         self,
@@ -280,7 +297,7 @@ class OllamaChatModel:
             "max_tokens": int(
                 max_tokens
                 if max_tokens is not None
-                else self.settings.ollama_max_tokens
+                else self._config.max_tokens
             ),
             "stream": False,
         }
@@ -288,31 +305,34 @@ class OllamaChatModel:
         if mapped:
             payload["tools"] = mapped
         url = f"{self.base_url}/v1/chat/completions"
+        headers = self._request_headers()
 
         def _once() -> dict[str, Any]:
             if self._http_client is not None:
-                r = self._http_client.post(url, json=payload)
+                r = self._http_client.post(url, json=payload, headers=headers)
             else:
                 with httpx.Client(timeout=120.0) as client:
-                    r = client.post(url, json=payload)
+                    r = client.post(url, json=payload, headers=headers)
             if is_transient_http_status(r.status_code):
-                raise OllamaError(
-                    f"Ollama chat HTTP {r.status_code}: {r.text[:300]}"
+                raise OpenAICompatError(
+                    f"OpenAI-compat chat HTTP {r.status_code}: {r.text[:300]}"
                 )
             if r.status_code >= 400:
-                raise OllamaError(
-                    f"Ollama chat HTTP {r.status_code}: {r.text[:300]}"
+                raise OpenAICompatError(
+                    f"OpenAI-compat chat HTTP {r.status_code}: {r.text[:300]}"
                 )
             data = r.json()
             if not isinstance(data, dict):
-                raise OllamaError(f"unexpected Ollama response type: {type(data)!r}")
+                raise OpenAICompatError(
+                    f"unexpected OpenAI-compat response type: {type(data)!r}"
+                )
             return data
 
         data = call_with_retries(
             _once,
             max_retries=self.max_retries,
-            should_retry=_ollama_should_retry,
-            label="ollama.chat",
+            should_retry=_openai_compat_should_retry,
+            label="openai_compat.chat",
         )
         text = _openai_compat_text(data)
         calls = _openai_compat_tool_calls(data)
@@ -331,12 +351,17 @@ class OllamaChatModel:
         )
 
 
-class OllamaError(RuntimeError):
-    """Ollama / OpenAI-compatible chat request failed."""
+class OpenAICompatError(RuntimeError):
+    """OpenAI-compatible chat request failed."""
 
 
-def _ollama_should_retry(exc: BaseException) -> bool:
-    if isinstance(exc, OllamaError):
+# Backward-compatible aliases for tests and imports.
+OllamaChatModel = OpenAICompatChatModel
+OllamaError = OpenAICompatError
+
+
+def _openai_compat_should_retry(exc: BaseException) -> bool:
+    if isinstance(exc, OpenAICompatError):
         return "HTTP 429" in str(exc) or "HTTP 5" in str(exc)
     return isinstance(exc, (httpx.TransportError, httpx.TimeoutException))
 
@@ -489,25 +514,31 @@ def get_chat_model(
     *,
     force_stub: bool = False,
 ) -> ChatModel:
-    """Factory: select chat adapter by ``LLM_PROVIDER`` (or force stub)."""
+    """Factory: select chat adapter via provider registry."""
     settings = settings or get_settings()
     if force_stub:
         logger.info("agent_llm_mode=stub reason=force_stub")
         return StubChatModel()
 
-    provider = (settings.llm_provider or "anthropic").strip().lower()
-    if provider == "stub":
+    config = resolve_llm_runtime_config(settings)
+    if config.adapter_shape == ADAPTER_SHAPE_STUB:
         logger.info("agent_llm_mode=stub")
         return StubChatModel()
-    if provider == "ollama":
-        logger.info("agent_llm_mode=ollama base=%s", settings.ollama_url)
-        return OllamaChatModel(settings)
-    if provider == "anthropic":
-        logger.info("agent_llm_mode=anthropic")
-        return AnthropicChatModel(settings)
+    if config.adapter_shape == ADAPTER_SHAPE_ANTHROPIC:
+        logger.info("agent_llm_mode=anthropic provider=%s", config.provider_id)
+        return AnthropicChatModel(settings, config=config)
+    if config.adapter_shape == ADAPTER_SHAPE_OPENAI_COMPAT:
+        logger.info(
+            "agent_llm_mode=openai_compat provider=%s base=%s",
+            config.provider_id,
+            config.base_url,
+        )
+        return OpenAICompatChatModel(settings, config=config)
 
     raise ValueError(
-        f"Unknown LLM_PROVIDER={provider!r}; expected anthropic|ollama|stub"
+        f"unsupported adapter shape {config.adapter_shape!r} for "
+        f"LLM_PROVIDER={config.provider_id!r}; "
+        f"registered: {', '.join(registered_provider_ids())}"
     )
 
 

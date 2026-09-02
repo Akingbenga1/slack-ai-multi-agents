@@ -257,18 +257,27 @@ class AgentTraceBody(BaseModel):
 
 
 def _llm_runtime_info(settings: Settings) -> dict[str, Any]:
-    provider = (settings.llm_provider or "anthropic").strip().lower()
-    if provider == "anthropic":
-        capable = settings.anthropic_model_sonnet
-        fast = settings.anthropic_model_haiku
-    elif provider == "ollama":
-        capable = settings.ollama_model_capable
-        fast = settings.ollama_model_fast
-    else:
+    from api.app.agent.llm_config import ADAPTER_SHAPE_STUB, resolve_llm_runtime_config
+
+    try:
+        config = resolve_llm_runtime_config(settings)
+    except ValueError:
+        provider = (settings.llm_provider or "anthropic").strip().lower()
+        return {
+            "llm_provider": provider,
+            "orchestrator_model_tier": "capable",
+            "orchestrator_model": "unknown",
+            "executor_model_tier": "fast",
+            "executor_model": "unknown",
+        }
+    if config.adapter_shape == ADAPTER_SHAPE_STUB:
         capable = "stub-capable"
         fast = "stub-fast"
+    else:
+        capable = config.model_capable
+        fast = config.model_fast
     return {
-        "llm_provider": provider,
+        "llm_provider": config.provider_id,
         "orchestrator_model_tier": "capable",
         "orchestrator_model": capable,
         "executor_model_tier": "fast",

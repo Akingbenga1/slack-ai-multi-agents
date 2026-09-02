@@ -1,9 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Search } from "lucide-react";
 import { ApiError, apiClient } from "@/lib/api";
-import panel from "@/components/dashboard/panel.module.css";
-import styles from "@/components/tools/tools.module.css";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export type DiscoveredMcpTool = {
   id: string;
@@ -27,6 +34,9 @@ type Props = {
 };
 
 const MCP_DISCOVERY_PATH = "/discovery/mcp-tools";
+
+const inputClassName =
+  "min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 function metadataLine(tool: DiscoveredMcpTool): string | null {
   const meta = tool.metadata;
@@ -143,100 +153,118 @@ export function McpToolDiscoveryPanel({ accessToken = null, onSelect }: Props) {
   }
 
   return (
-    <section className={styles.workspaceCard} aria-labelledby="tool-discovery-mcp">
-      <div className={styles.cardHead}>
-        <div>
-          <h2 className={styles.cardTitle} id="tool-discovery-mcp">
-            MCP server discovery
-          </h2>
-          <p className={styles.cardDesc}>
-            Search the Official MCP Registry via <code>/discovery/mcp-tools</code> and pick a
-            server to configure.
-          </p>
-        </div>
-      </div>
-
-      <form className={styles.discoveryForm} onSubmit={(ev) => void onDiscover(ev)}>
-        <label className={panel.formLabel}>
-          Search query
-          <span className={panel.formHint}>Describe the MCP capability or server you want</span>
-          <div className={styles.discoverySearchRow}>
-            <input
-              value={query}
-              onChange={(ev) => setQuery(ev.target.value)}
-              placeholder="e.g. postgres, slack, filesystem, github"
-              aria-label="MCP server discovery query"
-              maxLength={512}
-            />
-            <button
-              type="submit"
-              className={panel.btnPrimary}
-              disabled={searching || !query.trim()}
-            >
-              {searching ? "Searching…" : "Discover"}
-            </button>
-          </div>
-        </label>
-      </form>
-
-      {error ? (
-        <p className={panel.error} role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      {searched && !searching ? (
-        <div className={styles.discoveryResults}>
-          {!error && results.length === 0 ? (
-            <div className={styles.discoveryEmpty}>
-              <p className={styles.discoveryEmptyTitle}>No matches</p>
-              <p className={panel.meta}>No MCP servers found for “{query.trim()}”.</p>
+    <Card aria-labelledby="tool-discovery-mcp">
+      <CardHeader className="border-b border-border">
+        <CardTitle id="tool-discovery-mcp" className="text-headline-md">
+          MCP server discovery
+        </CardTitle>
+        <CardDescription>
+          Search the Official MCP Registry via{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">
+            /discovery/mcp-tools
+          </code>{" "}
+          and pick a server to configure.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        <form onSubmit={(ev) => void onDiscover(ev)}>
+          <label className="block">
+            <span className="text-sm font-medium text-foreground">Search query</span>
+            <span className="mt-1 block text-sm text-muted-foreground">
+              Describe the MCP capability or server you want
+            </span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                value={query}
+                onChange={(ev) => setQuery(ev.target.value)}
+                placeholder="e.g. postgres, slack, filesystem, github"
+                aria-label="MCP server discovery query"
+                maxLength={512}
+                className={inputClassName}
+              />
+              <Button
+                type="submit"
+                className="rounded-full"
+                disabled={searching || !query.trim()}
+              >
+                <Search className="h-4 w-4" />
+                {searching ? "Searching…" : "Discover"}
+              </Button>
             </div>
-          ) : null}
-          {results.length > 0 ? (
-            <>
-              <p className={styles.discoveryResultCount} aria-live="polite">
-                {results.length === 1
-                  ? "1 MCP server"
-                  : `${results.length} MCP servers`}
-              </p>
-              <ul className={styles.discoveryList}>
-                {results.map((tool) => {
-                  const extra = metadataLine(tool);
-                  return (
-                    <li key={tool.id} className={styles.discoveryItem}>
-                      <div>
-                        <p className={styles.discoveryItemTitle}>{tool.name}</p>
-                        <p className={styles.discoveryItemText}>
-                          {tool.summary || "No description"}
-                        </p>
-                        <p className={panel.meta}>
-                          {tool.id !== tool.name ? `${tool.id} · ` : ""}
-                          {tool.source}
-                          {extra ? ` · ${extra}` : ""}
-                        </p>
-                      </div>
-                      {onSelect ? (
-                        <button type="button" onClick={() => onSelect(tool)}>
-                          Use
-                        </button>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          ) : null}
-        </div>
-      ) : searching ? (
-        <div className={styles.discoveryIdle}>
-          <p className={panel.meta}>Searching MCP registry…</p>
-        </div>
-      ) : (
-        <div className={styles.discoveryIdle}>
-          <p className={panel.meta}>Enter a query to search available MCP servers.</p>
-        </div>
-      )}
-    </section>
+          </label>
+        </form>
+
+        {error ? (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        {searched && !searching ? (
+          <div className="space-y-3">
+            {!error && results.length === 0 ? (
+              <div className="rounded-lg border border-border bg-[#f8fafc] px-4 py-6 text-center">
+                <p className="font-medium text-foreground">No matches</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  No MCP servers found for “{query.trim()}”.
+                </p>
+              </div>
+            ) : null}
+            {results.length > 0 ? (
+              <>
+                <p className="text-sm text-muted-foreground" aria-live="polite">
+                  {results.length === 1
+                    ? "1 MCP server"
+                    : `${results.length} MCP servers`}
+                </p>
+                <ul className="space-y-3">
+                  {results.map((tool) => {
+                    const extra = metadataLine(tool);
+                    return (
+                      <li
+                        key={tool.id}
+                        className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-4 hover:bg-muted/30"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-foreground">{tool.name}</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {tool.summary || "No description"}
+                          </p>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {tool.id !== tool.name ? `${tool.id} · ` : ""}
+                            {tool.source}
+                            {extra ? ` · ${extra}` : ""}
+                          </p>
+                        </div>
+                        {onSelect ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="shrink-0 rounded-full"
+                            onClick={() => onSelect(tool)}
+                          >
+                            Use
+                          </Button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : searching ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }, (_, key) => (
+              <div key={key} className="h-16 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Enter a query to search available MCP servers.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

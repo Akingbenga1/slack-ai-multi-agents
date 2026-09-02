@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
 import { CreateToolForm } from "@/components/tools/CreateToolForm";
 import { authOptions } from "@/lib/auth";
 import { getMockTenantOptions } from "@/lib/mock/tools-data";
@@ -21,21 +20,21 @@ export default async function AdminCreateToolPage() {
           { label: "New" },
         ]}
         actions={
-          <div className={panel.formRow}>
-            <Link href="/admin/cli-host" className={panel.btnSecondary}>
+          <div>
+            <Link href="/admin/cli-host">
               CLI host
             </Link>
-            <Link href="/admin/mcp-host" className={panel.btnSecondary}>
+            <Link href="/admin/mcp-host">
               MCP host
             </Link>
           </div>
         }
+        className="mb-8"
       />
       <CreateToolForm
         cancelHref="/admin/tools"
         tenants={tenants}
-        accessToken={session?.accessToken ?? null}
-      />
+        accessToken={session?.accessToken ?? null} />
     </>
   );
 }

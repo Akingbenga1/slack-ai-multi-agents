@@ -68,6 +68,9 @@ class UsageEventItem(BaseModel):
 class UsageEventsResponse(BaseModel):
     tenant_id: str
     events: list[UsageEventItem]
+    total: int
+    limit: int
+    offset: int
 
 
 class JobLogItem(BaseModel):
@@ -82,6 +85,9 @@ class JobLogItem(BaseModel):
 class UsageJobsResponse(BaseModel):
     tenant_id: str
     jobs: list[JobLogItem]
+    total: int
+    limit: int
+    offset: int
 
 
 def _resolve_tenant_id(principal: AuthPrincipal) -> UUID:
@@ -118,13 +124,19 @@ def usage_events(
         Query(description="Optional filter: slack_mention, llm_tokens, job, …"),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> UsageEventsResponse:
     """Recent usage_events for the org logs page (OR-07)."""
     tid = _resolve_tenant_id(principal)
-    rows = list_usage_events(db, tid, event_type=event_type, limit=limit)
+    rows, total = list_usage_events(
+        db, tid, event_type=event_type, limit=limit, offset=offset,
+    )
     return UsageEventsResponse(
         tenant_id=str(tid),
         events=[UsageEventItem(**serialize_usage_event(r)) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -137,11 +149,17 @@ def usage_jobs(
         Query(alias="status", description="Optional filter e.g. failed"),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> UsageJobsResponse:
     """Recent jobs rows (errors when status=failed) for the org logs page."""
     tid = _resolve_tenant_id(principal)
-    rows = list_jobs(db, tid, status=status_filter, limit=limit)
+    rows, total = list_jobs(
+        db, tid, status=status_filter, limit=limit, offset=offset,
+    )
     return UsageJobsResponse(
         tenant_id=str(tid),
         jobs=[JobLogItem(**serialize_job(r)) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )

@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Props = {
   accessToken: string | null;
@@ -46,6 +49,13 @@ async function fetchBillingMe(
   });
 }
 
+function planBadgeVariant(status: string): "success" | "warning" | "default" {
+  const s = status.toLowerCase();
+  if (s === "active") return "success";
+  if (s === "inactive" || s === "past_due" || s === "canceled") return "warning";
+  return "default";
+}
+
 export function BillingActions({
   accessToken,
   tenantId,
@@ -53,12 +63,8 @@ export function BillingActions({
 }: Props) {
   const [pending, setPending] = useState<"checkout" | "portal" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [billing, setBilling] = useState<BillingCustomer | null | undefined>(
-    undefined,
-  );
-  const [waitingForWebhook, setWaitingForWebhook] = useState(
-    checkoutOutcome === "success",
-  );
+  const [billing, setBilling] = useState<BillingCustomer | null | undefined>(undefined);
+  const [waitingForWebhook, setWaitingForWebhook] = useState(checkoutOutcome === "success");
 
   const reload = useCallback(async () => {
     if (!accessToken) {
@@ -91,7 +97,6 @@ export function BillingActions({
     };
   }, [reload, checkoutOutcome]);
 
-  // After checkout success, poll until webhook activates the plan (or timeout).
   useEffect(() => {
     if (checkoutOutcome !== "success" || !accessToken) return;
     if (billing?.plan_status === "active") {
@@ -149,92 +154,96 @@ export function BillingActions({
         .map(([k, v]) => `${k}:${v ? "on" : "off"}`)
         .join(" · ")
     : null;
-  const stripeAdapter =
-    (billing?.provider || "").toLowerCase() === "stripe";
+  const stripeAdapter = (billing?.provider || "").toLowerCase() === "stripe";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <div
-        style={{
-          padding: "0.75rem 1rem",
-          background: "#f5f5f5",
-          borderRadius: 4,
-          fontSize: "0.95rem",
-        }}
-      >
-        {billing === undefined ? (
-          <p style={{ margin: 0 }}>Loading plan…</p>
-        ) : billing === null ? (
-          <p style={{ margin: 0 }}>
-            No billing customer yet — use <strong>Pay</strong> to create one and
-            start checkout (OR-02).
-          </p>
-        ) : (
-          <>
-            <p style={{ margin: "0 0 0.35rem" }}>
-              Plan status:{" "}
-              <strong style={{ color: planActive ? "#1b5e20" : "#9a3412" }}>
-                {billing.plan_status}
-              </strong>
-              {billing.external_subscription_id
-                ? ` · sub ${billing.external_subscription_id}`
-                : ""}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-headline-sm">Plan status</CardTitle>
+          <CardDescription>
+            Subscribe to activate agent features, ingest, and Slack sync entitlements.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {billing === undefined ? (
+            <p className="text-body-md text-muted-foreground">Loading plan…</p>
+          ) : billing === null ? (
+            <p className="text-body-md text-muted-foreground">
+              No billing customer yet — use <strong className="text-foreground">Pay</strong> to
+              create one and start checkout.
             </p>
-            {waitingForWebhook ? (
-              <p style={{ margin: "0 0 0.35rem", color: "var(--muted)" }}>
-                Waiting for payment confirmation to activate the plan…
-              </p>
-            ) : null}
-            {!planActive && !waitingForWebhook ? (
-              <p style={{ margin: "0 0 0.35rem", color: "var(--muted)" }}>
-                Agent features stay off until the organisation plan is active.
-                Pay below, or manage your subscription if you already have a
-                billing customer.
-              </p>
-            ) : null}
-            {entSummary ? (
-              <p style={{ margin: 0, color: "#444" }}>Entitlements: {entSummary}</p>
-            ) : null}
-          </>
-        )}
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-        <button
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-body-md text-muted-foreground">Plan status</span>
+                <Badge variant={planBadgeVariant(billing.plan_status)}>
+                  {billing.plan_status}
+                </Badge>
+                {billing.external_subscription_id ? (
+                  <span className="text-sm text-muted-foreground">
+                    sub {billing.external_subscription_id}
+                  </span>
+                ) : null}
+              </div>
+              {waitingForWebhook ? (
+                <p className="text-body-md text-muted-foreground">
+                  Waiting for payment confirmation to activate the plan…
+                </p>
+              ) : null}
+              {!planActive && !waitingForWebhook ? (
+                <p className="text-body-md text-muted-foreground">
+                  Agent features stay off until the organisation plan is active. Pay below, or
+                  manage your subscription if you already have a billing customer.
+                </p>
+              ) : null}
+              {entSummary ? (
+                <p className="text-sm text-muted-foreground">Entitlements: {entSummary}</p>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap gap-3">
+        <Button
           type="button"
           disabled={pending !== null}
+          className="rounded-full"
           onClick={() => start("checkout")}
-          style={{ padding: "0.5rem 1rem", cursor: "pointer" }}
         >
           {pending === "checkout"
             ? "Starting checkout…"
             : planActive
               ? "Resubscribe / change plan"
               : "Pay"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
           disabled={pending !== null}
+          className="rounded-full"
           onClick={() => start("portal")}
-          style={{ padding: "0.5rem 1rem", cursor: "pointer" }}
         >
-          {pending === "portal"
-            ? "Opening…"
-            : "Manage subscription"}
-        </button>
+          {pending === "portal" ? "Opening…" : "Manage subscription"}
+        </Button>
       </div>
+
       {error ? (
-        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
+        <p className="text-body-md text-danger" role="alert">
           {error}
         </p>
       ) : null}
-      <p style={{ color: "var(--muted)", margin: 0, fontSize: "0.9rem" }}>
-        Requires payment provider keys in the API <code>.env</code>. See{" "}
-        <code>docs/billing.md</code>.
+
+      <p className="text-sm text-muted-foreground">
+        Requires payment provider keys in the API <code className="rounded bg-muted px-1">.env</code>
+        . See <code className="rounded bg-muted px-1">docs/billing.md</code>.
         {stripeAdapter ? (
           <>
             {" "}
-            Stripe adapter: <code>STRIPE_SECRET_KEY</code>,{" "}
-            <code>STRIPE_PRICE_ID</code>, <code>STRIPE_WEBHOOK_SECRET</code>.
+            Stripe adapter: <code className="rounded bg-muted px-1">STRIPE_SECRET_KEY</code>,{" "}
+            <code className="rounded bg-muted px-1">STRIPE_PRICE_ID</code>,{" "}
+            <code className="rounded bg-muted px-1">STRIPE_WEBHOOK_SECRET</code>.
           </>
         ) : null}
       </p>

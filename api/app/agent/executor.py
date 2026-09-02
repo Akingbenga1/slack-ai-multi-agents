@@ -43,11 +43,19 @@ from api.app.agent.tools import (
 from api.app.agent.tool_rag import load_full_tool_schema
 from api.app.agent.llm import ToolSchema
 from api.app.agent.uvx_runner import run_uvx_from_arguments
+from api.app.agent.uvx_invoke import build_uvx_attempt_ledger
 from api.app.db.models import AgentPlan, AgentPlanStep, AgentRun
 from api.app.db.plan_store import (
     get_agent_plan,
     insert_agent_run,
     list_agent_plan_steps,
+)
+from api.app.agent.outcome_verifier import (
+    capture_working_scope,
+    combine_results_for_plan_check,
+    criteria_text,
+    delivering_attempts,
+    verify_step_outcome,
 )
 from api.app.logging_config import get_logger, log_tool_rag_activity
 
@@ -77,6 +85,19 @@ _REACT_UVX_SYSTEM = (
     "- Use attachment local_path values exactly (forward slashes are fine on Windows).\n"
     "- Prefer run_uvx for conversions, merge/split/combine, OCR, table extraction, "
     "compression, archives, spreadsheets, images, audio, and other CLI-capable tasks.\n"
+    "- PyPI install names often differ from console script names: set from_spec to the "
+    "installable package and package to the executable (e.g. from_spec=pyexcel-cli, "
+    "package=pyexcel). Never pass the install/package name as package when they differ.\n"
+    "- Use with_packages for format plugins implied by input extensions (e.g. "
+    "pyexcel-xlsx for .xlsx inputs).\n"
+    "- Help probes: set help_only=true. Top-level CLI help uses empty args_list. "
+    "Subcommand help uses help_path=['<subcommand>'] (or args_list=['<subcommand>'] "
+    "with help_only=true). After top-level help lists a subcommand you need, run "
+    "subcommand help before the real command.\n"
+    "- If uvx reports an executable is not provided, fix package/from_spec — do not "
+    "retry the same package name as the executable.\n"
+    "- User question text may mention install names for motivation only; always follow "
+    "the from_spec/package rules above for run_uvx.\n"
     "- Pick PyPI packages that expose a console script via uvx; pure libraries without "
     "executables cannot be run directly.\n"
     "- Write new outputs into the working directory with clear filenames. Never "
@@ -86,8 +107,8 @@ _REACT_UVX_SYSTEM = (
     "choosing tools or failing. Do not repeat work a prior step already finished.\n"
     "- If success criteria appear already met (expected output file exists), confirm "
     "and stop instead of running redundant tools.\n"
-    "- After each tool result: retry with corrected args, run another tool, or stop "
-    "when the success criteria are satisfied.\n"
+    "- After each tool result: read error_class, retryable, and suggested_next; "
+    "retry with corrected args, run another tool, or stop when success criteria are met.\n"
     "- Informational goals (summarize, compare, explain): once you have enough "
     "content from tools, you may answer in plain text without further tool calls.\n"
     "- File-producing goals (merge, convert, export, create): you must create the "
@@ -99,18 +120,40 @@ _RUN_UVX_SCHEMA = ToolSchema(
     name=RUN_UVX_TOOL_NAME,
     description=(
         "Install-and-run a PyPI console script via real uvx / uv tool run. "
-        "Args: package (PyPI name or name[extra]), optional from_spec, "
-        "args_list (CLI argv after the entrypoint)."
+        "Args: package (console script / executable name), optional from_spec "
+        "(PyPI install spec when it differs from package), optional with_packages "
+        "(extra deps as uvx --with), args_list (CLI argv after the entrypoint), "
+        "optional help_path (subcommand names for help_only probes)."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "package": {"type": "string"},
+            "package": {
+                "type": "string",
+                "description": "Console script to run (executable name), not the PyPI install name.",
+            },
             "from_spec": {
                 "type": "string",
-                "description": "Optional uvx --from spec, e.g. markitdown[pdf]",
+                "description": "Optional uvx --from spec when install name differs, e.g. pyexcel-cli",
             },
-            "args_list": {"type": "array", "items": {"type": "string"}},
+            "with_packages": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional extra PyPI deps passed as repeated uvx --with flags.",
+            },
+            "args_list": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "CLI argv after the executable entrypoint.",
+            },
+            "help_path": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Subcommand path for help probes when help_only=true "
+                    "(e.g. ['split'] runs `<exe> split --help`)."
+                ),
+            },
             "help_only": {"type": "boolean"},
         },
         "required": ["package"],
@@ -294,8 +337,11 @@ def _execute_run_uvx_call(
     context: AgentContext,
     extra: dict[str, Any],
     db: Session,
+    prior_attempts: list[dict[str, Any]] | None = None,
+    instruction: str = "",
+    success_criteria: str = "",
 ) -> dict[str, Any]:
-    """Prefer injected test tool; otherwise call real uvx_runner."""
+    """Prefer injected test tool; otherwise call real uvx_runner with recovery."""
     args = dict(arguments or {})
     cwd = _resolve_working_dir(context, args)
     if cwd and "cwd" not in args:
@@ -307,7 +353,13 @@ def _execute_run_uvx_call(
         return invoke_tool(
             injected, args, client_id=context.client_id, db=db, extra=extra
         )
-    return run_uvx_from_arguments(args)
+    return run_uvx_from_arguments(
+        args,
+        prior_attempts=prior_attempts,
+        attachments=list(context.attachments or []),
+        instruction=instruction,
+        success_criteria=success_criteria,
+    )
 
 
 def _summarize_step_result(val: dict[str, Any]) -> str:
@@ -359,6 +411,69 @@ def _format_prior_step_results(prior: dict[str, Any] | None) -> str:
     return "\n\n".join(chunks) if chunks else "(none)"
 
 
+def _format_uvx_observation(attempt: dict[str, Any]) -> str:
+    notes: list[str] = []
+    if attempt.get("preflight_corrected"):
+        notes.append(f"preflight_notes={attempt.get('preflight_notes')!r}")
+    if attempt.get("remediated"):
+        notes.append("remediated=true")
+    if attempt.get("help_ladder"):
+        notes.append("help_ladder=true")
+    if attempt.get("code") == "duplicate_attempt":
+        notes.append("duplicate_attempt_blocked=true")
+    header = " ".join(notes)
+    structured = (
+        f"error_class={attempt.get('error_class')!r} "
+        f"retryable={attempt.get('retryable')!r}\n"
+        f"suggested_next={attempt.get('suggested_next')!r}\n"
+    )
+    return (
+        structured
+        + f"uvx package={attempt.get('package')!r} "
+        f"from_spec={attempt.get('from_spec')!r} "
+        f"with_packages={attempt.get('with_packages')!r} "
+        f"exit={attempt.get('exit_code')!r} ok={attempt.get('ok')!r}"
+        f"{(' ' + header) if header else ''}\n"
+        f"output_files={attempt.get('output_files')!r}\n"
+        f"stdout:\n{(attempt.get('stdout') or '')[:4000]}\n"
+        f"stderr:\n"
+        f"{(attempt.get('stderr') or attempt.get('error') or '')[:1000]}"
+    )
+
+
+def _append_uvx_attempts(
+    attempts: list[dict[str, Any]],
+    result: dict[str, Any],
+    *,
+    round_i: int,
+    call_args: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Flatten primary + help-ladder attempts into the step attempt log."""
+    batch: list[dict[str, Any]] = []
+    primary = {
+        **result,
+        "round": round_i + 1,
+        "tool": RUN_UVX_TOOL_NAME,
+        "help_only": bool(call_args.get("help_only") or call_args.get("help")),
+        "args_list": list(call_args.get("args_list") or []),
+        "from_spec": call_args.get("from_spec") or call_args.get("from"),
+        "with_packages": call_args.get("with_packages") or call_args.get("with"),
+    }
+    batch.append(primary)
+    for ladder in result.get("ladder_attempts") or []:
+        if isinstance(ladder, dict):
+            batch.append(
+                {
+                    **ladder,
+                    "round": round_i + 1,
+                    "tool": RUN_UVX_TOOL_NAME,
+                    "help_only": True,
+                }
+            )
+    attempts.extend(batch)
+    return batch
+
+
 def _build_react_user_prompt(
     *,
     context: AgentContext,
@@ -370,7 +485,9 @@ def _build_react_user_prompt(
 ) -> str:
     return "\n".join(
         [
-            f"User question: {context.question or ''}",
+            f"User intent: {context.question or ''}",
+            "Note: package or tool names mentioned in the user intent are hints only; "
+            "follow system rules for run_uvx from_spec/package/with_packages.",
             f"Goal: {instruction}",
             f"Success criteria: {success_criteria or '(meet the goal)'}",
             f"Working directory: {cwd or '(default)'}",
@@ -388,10 +505,11 @@ def _react_success_from_attempts(
     instruction: str,
     done_text: str = "",
 ) -> dict[str, Any] | None:
-    """Return a success payload when tool attempts already satisfy the goal."""
-    if not any(a.get("ok") for a in attempts):
+    """Return a success payload when delivering attempts exist (not probes)."""
+    productive = delivering_attempts(attempts)
+    if not productive:
         return None
-    last_ok = next(a for a in reversed(attempts) if a.get("ok"))
+    last_ok = productive[-1]
     payload = {
         **last_ok,
         "attempt_count": len(attempts),
@@ -452,9 +570,13 @@ def _run_english_goal_react(
     }
 
     for round_i in range(max_attempts):
+        round_messages = list(messages)
+        ledger = build_uvx_attempt_ledger(attempts, max_attempts=max_attempts)
+        if ledger:
+            round_messages = [{"role": "user", "content": ledger}, *round_messages]
         llm = model.complete(
             system=_REACT_UVX_SYSTEM,
-            messages=messages,
+            messages=round_messages,
             model_tier="fast",
             tools=[_RUN_UVX_SCHEMA, _WRITE_FILE_SCHEMA, _WRITE_PDF_SCHEMA],
         )
@@ -465,15 +587,6 @@ def _run_english_goal_react(
             )
             if success is not None:
                 return success
-            if done_text and len(done_text) > 40:
-                return {
-                    "ok": True,
-                    "stdout": done_text,
-                    "done_text": done_text,
-                    "attempt_count": len(attempts),
-                    "attempts": attempts,
-                    "instruction": instruction,
-                }
             if round_i < max_attempts - 1:
                 messages.append(
                     {
@@ -568,34 +681,35 @@ def _run_english_goal_react(
             if cwd and "cwd" not in call_args:
                 call_args["cwd"] = cwd
             result = _execute_run_uvx_call(
-                call_args, context=context, extra=extra, db=db
+                call_args,
+                context=context,
+                extra=extra,
+                db=db,
+                prior_attempts=attempts,
+                instruction=instruction,
+                success_criteria=success_criteria or "",
             )
-            attempt = {
-                **(
-                    result
-                    if isinstance(result, dict)
-                    else {"ok": False, "error": str(result)}
-                ),
-                "round": round_i + 1,
-                "tool": RUN_UVX_TOOL_NAME,
-            }
-            attempts.append(attempt)
+            batch = _append_uvx_attempts(
+                attempts,
+                result if isinstance(result, dict) else {"ok": False, "error": str(result)},
+                round_i=round_i,
+                call_args=call_args,
+            )
             last_result = {
-                **attempt,
+                **batch[-1],
                 "attempt_count": len(attempts),
                 "attempts": attempts,
                 "instruction": instruction,
             }
-            obs = (
-                f"uvx package={attempt.get('package')!r} "
-                f"exit={attempt.get('exit_code')!r} ok={attempt.get('ok')!r}\n"
-                f"stdout:\n{(attempt.get('stdout') or '')[:4000]}\n"
-                f"stderr:\n"
-                f"{(attempt.get('stderr') or attempt.get('error') or '')[:1000]}"
+            obs_parts = [_format_uvx_observation(item) for item in batch]
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Tool result:\n" + "\n\n".join(obs_parts),
+                }
             )
-            messages.append({"role": "user", "content": f"Tool result:\n{obs}"})
 
-    if any(a.get("ok") for a in attempts):
+    if delivering_attempts(attempts):
         success = _react_success_from_attempts(attempts, instruction=instruction)
         if success is not None:
             return success
@@ -695,6 +809,68 @@ def _skip_remaining(steps: list[AgentPlanStep], start_index: int) -> None:
     for pending in steps[start_index + 1 :]:
         if pending.status == "pending":
             pending.status = "skipped"
+
+
+def _log_step_boundary(
+    *,
+    phase: str,
+    context: AgentContext,
+    plan_id: str,
+    step_index: int,
+    tool_name: str,
+    scope_dir: str | None,
+) -> None:
+    snapshot = capture_working_scope(scope_dir)
+    log_tool_rag_activity(
+        phase="executor_step_boundary",
+        client_id=context.client_id,
+        boundary_phase=phase,
+        plan_id=plan_id,
+        step_index=step_index,
+        tool_name=tool_name,
+        working_scope=snapshot,
+    )
+
+
+def _final_goal_step(steps: list[AgentPlanStep]) -> AgentPlanStep | None:
+    for step in reversed(steps):
+        meta = step_meta(step.arguments)
+        step_type = infer_step_type(step.tool_name or "", meta)
+        if step_type in (STEP_TYPE_ADVICE, STEP_TYPE_HALT):
+            continue
+        if (step.tool_name or "").strip():
+            return step
+    return None
+
+
+def _plan_goal_verification(
+    *,
+    steps: list[AgentPlanStep],
+    step_results: dict[str, Any],
+    current_result: dict[str, Any],
+    context: AgentContext,
+    invoke_args: dict[str, Any],
+):
+    final = _final_goal_step(steps)
+    if final is None:
+        return None
+    criteria = criteria_text(final.success_criteria)
+    if not criteria:
+        return None
+    merged = combine_results_for_plan_check(step_results)
+    for key in ("output_file", "path", "stdout", "done_text", "attempts"):
+        if current_result.get(key) and not merged.get(key):
+            merged[key] = current_result.get(key)
+    if current_result.get("ok"):
+        merged["ok"] = True
+    instruction = english_instruction(tool_arguments(final.arguments)) or criteria
+    cwd = _resolve_working_dir(context, invoke_args)
+    return verify_step_outcome(
+        success_criteria=criteria,
+        instruction=instruction,
+        result=merged,
+        scope_dir=cwd,
+    )
 
 
 class ExecutorAgent(Agent):
@@ -857,11 +1033,21 @@ class ExecutorAgent(Agent):
                     **invoke_args,
                     "prior_step_results": dict(step_results),
                 }
+            step_cwd = _resolve_working_dir(context, invoke_args)
+            _log_step_boundary(
+                phase="start",
+                context=context,
+                plan_id=str(plan.id),
+                step_index=index,
+                tool_name=tool_name,
+                scope_dir=step_cwd,
+            )
+            step_criteria = criteria_text(step.success_criteria)
 
             try:
                 if is_english_goal_step(tool_name, invoke_args):
                     instruction = english_instruction(invoke_args) or (
-                        step.success_criteria or tool_name
+                        step_criteria or tool_name
                     )
                     log_tool_rag_activity(
                         phase="executor_english_goal",
@@ -876,7 +1062,7 @@ class ExecutorAgent(Agent):
                         extra=extra,
                         db=db,
                         instruction=instruction,
-                        success_criteria=step.success_criteria,
+                        success_criteria=step_criteria or None,
                         step_arguments=invoke_args,
                     )
                 elif tool_name == RUN_UVX_TOOL_NAME:
@@ -952,8 +1138,78 @@ class ExecutorAgent(Agent):
                 db.flush()
                 continue
 
+            instruction_for_verify = None
+            if is_english_goal_step(tool_name, invoke_args):
+                instruction_for_verify = (
+                    english_instruction(invoke_args) or step_criteria or tool_name
+                )
+
+            _log_step_boundary(
+                phase="end",
+                context=context,
+                plan_id=str(plan.id),
+                step_index=index,
+                tool_name=tool_name,
+                scope_dir=step_cwd,
+            )
+
+            if isinstance(result, dict) and (
+                is_english_goal_step(tool_name, invoke_args) or step_criteria
+            ):
+                verification = verify_step_outcome(
+                    success_criteria=step.success_criteria,
+                    instruction=instruction_for_verify,
+                    result=result,
+                    scope_dir=step_cwd,
+                )
+                result = {
+                    **result,
+                    "verification_method": verification.method,
+                    "verification_reason": verification.reason,
+                }
+                if verification.verified and not result.get("ok"):
+                    result["ok"] = True
+                    result["verified"] = True
+                elif result.get("ok") and not verification.verified:
+                    result["ok"] = False
+                    result["error"] = verification.reason
+
             failed = result_error(result)
             if failed:
+                plan_check = _plan_goal_verification(
+                    steps=steps,
+                    step_results=step_results,
+                    current_result=result if isinstance(result, dict) else {},
+                    context=context,
+                    invoke_args=invoke_args,
+                )
+                if plan_check is not None and plan_check.verified:
+                    step.status = "skipped"
+                    step.error = failed
+                    step.result = {
+                        **(result if isinstance(result, dict) else {"error": failed}),
+                        "plan_level_success": True,
+                        "verification_method": plan_check.method,
+                        "verification_reason": plan_check.reason,
+                    }
+                    _skip_remaining(steps, index)
+                    final_message = "\n\n".join(output_lines).strip() or plan_check.reason
+                    if output_lines:
+                        final_message = _compose_final_answer(
+                            context=context,
+                            extra=extra,
+                            evidence_lines=output_lines,
+                            fallback=final_message,
+                        )
+                    _finish_run(plan, run, status="succeeded", error=None)
+                    db.commit()
+                    return AgentResult(
+                        role=self.role,
+                        client_id=context.client_id,
+                        status="succeeded",
+                        message=final_message,
+                        extra={"plan_id": str(plan.id), "run_id": str(run.id)},
+                    )
                 step.status = "failed"
                 step.error = failed
                 step.result = result

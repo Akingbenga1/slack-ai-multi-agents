@@ -15,20 +15,17 @@ from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.models import Tenant
 from api.app.db.session import get_db
-from api.app.governance.rate_limit import check_tenant_rate_limit
 from api.app.logging_config import get_logger
 from api.app.settings import Settings, get_settings
 from api.app.slack.agent_reply import process_agent_reply
-from api.app.slack.echo import should_reply
+from api.app.slack.event_dispatch import dispatch_events_api_payload
 from api.app.slack.oauth_state import create_slack_oauth_state, verify_slack_oauth_state
 from api.app.slack.store import (
-    get_bot_token,
-    get_install_by_team,
     get_install_by_tenant,
     upsert_install,
 )
 from api.app.slack.verify import verify_slack_signature
-from api.app.tenant import get_client_id, set_client_id
+from api.app.tenant import get_client_id
 
 logger = get_logger("api.slack")
 
@@ -108,7 +105,7 @@ async def slack_events(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Any:
-    """HTTP Events: signature verify, url_verification, mention/DM → LangGraph."""
+    """HTTP Events: signature verify, url_verification, mention/DM dispatch."""
     body = await verify_slack_signature(request, settings.slack_signing_secret)
     payload = json.loads(body.decode("utf-8"))
 
@@ -116,45 +113,22 @@ async def slack_events(
         challenge = payload.get("challenge", "")
         return PlainTextResponse(content=challenge)
 
-    event = payload.get("event") or {}
-    team_id = payload.get("team_id") or event.get("team")
-    install = get_install_by_team(db, team_id) if team_id else None
-    if install:
-        set_client_id(str(install.tenant_id))
-        logger.info(
-            "slack_event type=%s team_id=%s",
-            event.get("type"),
-            team_id,
-        )
-        # Gateway RPM after tenant resolve. Return 200 (not 429) so Slack does not retry-storm.
-        rl = check_tenant_rate_limit(str(install.tenant_id), settings=settings)
-        if not rl.allowed:
-            logger.warning(
-                "slack_event_rate_limited team_id=%s tenant_id=%s",
-                team_id,
-                install.tenant_id,
-            )
-            return JSONResponse(content={"ok": True, "rate_limited": True})
+    if settings.slack_events_transport == "socket":
+        logger.debug("slack_http_event_skipped transport=socket")
+        return JSONResponse({"ok": True, "transport": "socket"})
 
-    # Slack retries on slow/5xx — skip to avoid duplicate posts
     is_retry = bool(request.headers.get("X-Slack-Retry-Num"))
-    if install and not is_retry and should_reply(event):
-        channel = event.get("channel")
-        if channel:
-            try:
-                token = get_bot_token(install, settings)
-                # Ack fast; agent + postMessage run after response (Slack ~3s window)
-                background_tasks.add_task(
-                    process_agent_reply,
-                    tenant_id=install.tenant_id,
-                    bot_token=token,
-                    event=dict(event),
-                    team_id=str(team_id) if team_id else None,
-                    settings=settings,
-                )
-            except Exception:
-                logger.exception("slack_agent_enqueue_failed team_id=%s", team_id)
 
+    def _background(**kwargs: Any) -> None:
+        background_tasks.add_task(process_agent_reply, **kwargs)
+
+    dispatch_events_api_payload(
+        payload,
+        settings=settings,
+        is_retry=is_retry,
+        background=_background,
+        db=db,
+    )
     return JSONResponse({"ok": True})
 
 
@@ -304,6 +278,8 @@ def slack_connection(
             "installed_at": None,
             "install_url": install_url,
             "slack_configured": bool(settings.slack_client_id),
+            "events_transport": settings.slack_events_transport,
+            "socket_mode_enabled": settings.slack_socket_mode_enabled(),
         }
     return {
         "connected": True,
@@ -314,6 +290,8 @@ def slack_connection(
         "installed_at": row.installed_at.isoformat() if row.installed_at else None,
         "install_url": install_url,
         "slack_configured": bool(settings.slack_client_id),
+        "events_transport": settings.slack_events_transport,
+        "socket_mode_enabled": settings.slack_socket_mode_enabled(),
     }
 
 

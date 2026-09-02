@@ -13,6 +13,8 @@ from api.app.agent.llm import (
     AnthropicChatModel,
     OllamaChatModel,
     OllamaError,
+    OpenAICompatChatModel,
+    OpenAICompatError,
     StubChatModel,
     get_chat_model,
 )
@@ -39,7 +41,7 @@ def test_factory_force_stub():
 
 def test_factory_anthropic_requires_key():
     settings = Settings(llm_provider="anthropic", anthropic_api_key="")
-    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+    with pytest.raises(ValueError, match="LLM API key"):
         get_chat_model(settings)
 
 
@@ -150,5 +152,55 @@ def test_ollama_http_error():
 
 def test_factory_unknown_provider():
     settings = Settings.model_construct(llm_provider="nope")
-    with pytest.raises(ValueError, match="Unknown LLM_PROVIDER"):
+    with pytest.raises(ValueError, match="registered"):
         get_chat_model(settings)
+
+
+def test_factory_openai_compat_neutral_env():
+    settings = Settings(
+        llm_provider="openai_compat",
+        llm_base_url="http://remote.test",
+        llm_api_key="sk-remote",
+        llm_model_fast="fast-model",
+        llm_model_capable="capable-model",
+    )
+    model = get_chat_model(settings)
+    assert isinstance(model, OpenAICompatChatModel)
+    assert model._model_id("fast") == "fast-model"
+    assert model._model_id("capable") == "capable-model"
+
+
+def test_openai_compat_sends_bearer_when_api_key_set():
+    settings = Settings(
+        llm_provider="openai_compat",
+        llm_base_url="http://remote.test",
+        llm_api_key="sk-remote",
+        llm_model_fast="fast-model",
+        llm_model_capable="capable-model",
+    )
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        return httpx.Response(
+            200,
+            json={
+                "model": "fast-model",
+                "choices": [
+                    {"message": {"role": "assistant", "content": "remote reply"}}
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, base_url="http://remote.test") as client:
+        model = OpenAICompatChatModel(settings, http_client=client, max_retries=1)
+        result = model.complete(
+            system="sys",
+            messages=[{"role": "user", "content": "q"}],
+            model_tier="fast",
+        )
+    assert result.text == "remote reply"
+    assert captured["auth"] == "Bearer sk-remote"

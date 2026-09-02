@@ -18,6 +18,7 @@ export default async function OrgCreateToolPage() {
           { label: "Tools", href: "/app/tools" },
           { label: "New" },
         ]}
+        className="mb-8"
       />
       <CreateToolForm
         cancelHref="/app/tools"

@@ -1,10 +1,10 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
 import { BillingTabNav } from "@/components/billing/BillingTabNav";
 import { orgBillingTabs } from "@/lib/billing-tabs";
 import { BillingActions } from "@/components/BillingActions";
+import { Card, CardContent } from "@/components/ui/card";
 import { sessionTenantId } from "@/lib/tenant";
 
 type Props = {
@@ -39,6 +39,7 @@ export default async function BillingPage({ searchParams }: Props) {
   return (
     <>
       <PageHeader
+        className="mb-8"
         title="Billing"
         description="Pay for the organisation plan, or manage your subscription and payment method."
         breadcrumbs={[
@@ -46,9 +47,13 @@ export default async function BillingPage({ searchParams }: Props) {
           { label: "Billing" },
         ]}
       />
-      {banner ? <p className={panel.infoBanner}>{banner}</p> : null}
+      {banner ? (
+        <Card className="mb-6 border-primary/20 bg-primary/5">
+          <CardContent className="py-4 text-body-md text-foreground">{banner}</CardContent>
+        </Card>
+      ) : null}
       <BillingTabNav tabs={orgBillingTabs()} />
-      <div className={panel.section}>
+      <div className="mt-6">
         <BillingActions
           accessToken={session?.accessToken ?? null}
           tenantId={tenantId}

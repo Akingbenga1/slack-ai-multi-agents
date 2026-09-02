@@ -587,6 +587,9 @@ def test_plan_system_requires_english_execute_goal_steps():
     assert "shortlisted tool catalog" not in _PLAN_SYSTEM
 
 
+def test_plan_system_single_outcome_for_attached_transformations():
+    assert "one execute_goal step" in _PLAN_SYSTEM
+    assert "Do not add separate validation" in _PLAN_SYSTEM
 def test_find_destructive_plan_violations_detects_delete_tool():
     violations = find_destructive_plan_violations(
         [{"tool_name": "delete_file", "arguments": {"path": "/tmp/a.txt"}}]

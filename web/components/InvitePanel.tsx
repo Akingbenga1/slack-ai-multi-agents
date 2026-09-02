@@ -5,7 +5,10 @@ import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError, apiClient, getApiBaseUrl } from "@/lib/api";
-import panel from "@/components/dashboard/panel.module.css";
+import { AuthFormField, authInputClassName } from "@/components/auth/PublicAuthShell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type InviteRow = {
   id: string;
@@ -54,22 +57,14 @@ export function InvitePanel({
     return <CreateInvite accessToken={accessToken} tenantId={tenantId} />;
   }
   return (
-    <>
-      <p>
-        Org admins can invite additional admins to the <strong>same</strong>{" "}
-        organisation. Invited users cannot create a second org from the link.
-      </p>
-      <p className={panel.meta}>
-        There is no email send in this sprint — copy the magic-link URL
-        (<code>WEB_APP_URL/invite?token=…</code>). Sign in to create an invite from{" "}
-        <Link href="/app/invite">Invite team</Link>, or open a link you were given.
-      </p>
-      <p>
-        <Link href="/login">Sign in</Link>
-        {" · "}
-        <Link href="/signup">Create organisation</Link>
-      </p>
-    </>
+    <p className="text-body-md text-muted-foreground">
+      This page is for accepting invitations. If you arrived here without a link from your
+      admin, ask them to resend it — or{" "}
+      <Link href="/signup" className="font-medium text-primary hover:underline">
+        create your own organisation
+      </Link>{" "}
+      instead.
+    </p>
   );
 }
 
@@ -127,60 +122,65 @@ function CreateInvite({
   }
 
   return (
-    <>
-      <p className={panel.sectionDesc}>
-        Invite another <strong>org admin</strong> to this tenant. Copy the URL
-        — SMTP is out of scope. They join this organisation only.
+    <div className="space-y-6">
+      <p className="text-body-md text-muted-foreground">
+        Invite another <strong className="text-foreground">org admin</strong> to this organisation.
+        Copy the invitation link and share it with them directly.
       </p>
-      <form className={panel.formGrid} onSubmit={(ev) => void onSubmit(ev)}>
-        <label className={panel.formLabel}>
-          Email
+      <form onSubmit={(ev) => void onSubmit(ev)} className="space-y-4">
+        <AuthFormField label="Email">
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             placeholder="colleague@example.com"
+            className={authInputClassName}
           />
-        </label>
+        </AuthFormField>
         {error ? (
-          <p className={panel.error} role="alert">
+          <p className="text-sm text-danger" role="alert">
             {error}
           </p>
         ) : null}
-        <div className={panel.formRow}>
-          <button type="submit" className={panel.btnPrimary} disabled={pending}>
-            {pending ? "Creating…" : "Create invite link"}
-          </button>
-        </div>
+        <Button type="submit" disabled={pending} className="rounded-full">
+          {pending ? "Creating…" : "Create invite link"}
+        </Button>
       </form>
       {lastUrl ? (
-        <p className={panel.infoBanner} style={{ marginTop: "1rem" }}>
-          Copy this URL now:
-          <br />
-          <code style={{ wordBreak: "break-all" }}>{lastUrl}</code>
-        </p>
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-headline-sm">Copy invitation link</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <code className="block break-all text-sm text-foreground">{lastUrl}</code>
+          </CardContent>
+        </Card>
       ) : null}
       {rows.length > 0 ? (
-        <div style={{ marginTop: "1.5rem" }}>
-          <div className={panel.sectionHeader}>
-            <h2 className={panel.sectionTitle}>Recent invites</h2>
-            <span className={panel.sectionCount}>{rows.length}</span>
-          </div>
-          <ul className={panel.detailList}>
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-border pb-4">
+            <div>
+              <CardTitle className="text-headline-sm">Recent invites</CardTitle>
+              <CardDescription>{rows.length} total</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="divide-y divide-border p-0">
             {rows.map((row) => (
-              <li key={row.id} className={panel.detailItem}>
-                <p className={panel.detailLabel}>{row.email}</p>
-                <p className={panel.detailValue}>
-                  {row.used_at ? "used" : "pending"}
-                  {row.expires_at ? ` · expires ${row.expires_at}` : ""}
+              <div key={row.id} className="px-6 py-4">
+                <p className="font-medium text-foreground">{row.email}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  <Badge variant={row.used_at ? "default" : "warning"} className="mr-2">
+                    {row.used_at ? "used" : "pending"}
+                  </Badge>
+                  {row.expires_at ? `expires ${row.expires_at}` : ""}
                 </p>
-              </li>
+              </div>
             ))}
-          </ul>
-        </div>
+          </CardContent>
+        </Card>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -260,40 +260,39 @@ function AcceptInvite({ token }: { token: string }) {
 
   if (loadError) {
     return (
-      <p style={{ color: "var(--error)" }} role="alert">
+      <p className="text-body-md text-danger" role="alert">
         {loadError}
       </p>
     );
   }
   if (!preview) {
-    return <p>Loading invite…</p>;
+    return <p className="text-body-md text-muted-foreground">Loading invite…</p>;
   }
 
   return (
-    <>
-      <p>
-        Join <strong>{preview.tenant_name || preview.tenant_slug}</strong> as{" "}
+    <div className="space-y-4">
+      <p className="text-body-md text-muted-foreground">
+        Join <strong className="text-foreground">{preview.tenant_name || preview.tenant_slug}</strong> as{" "}
         {preview.role}. This does not create a new organisation.
       </p>
-      <form
-        onSubmit={(ev) => void onSubmit(ev)}
-        style={{ display: "grid", gap: "0.75rem", maxWidth: 360 }}
-      >
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Email</span>
-          <input type="email" value={preview.email} readOnly style={{ padding: "0.5rem" }} />
-        </label>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Display name (optional)</span>
+      <form onSubmit={(ev) => void onSubmit(ev)} className="space-y-4">
+        <AuthFormField label="Email">
+          <input
+            type="email"
+            value={preview.email}
+            readOnly
+            className={authInputClassName + " bg-muted"}
+          />
+        </AuthFormField>
+        <AuthFormField label="Display name" hint="Optional">
           <input
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Password</span>
+        </AuthFormField>
+        <AuthFormField label="Password" hint="Minimum 8 characters">
           <input
             type="password"
             value={password}
@@ -301,18 +300,18 @@ function AcceptInvite({ token }: { token: string }) {
             required
             minLength={8}
             autoComplete="new-password"
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
+        </AuthFormField>
         {error ? (
-          <p style={{ color: "var(--error)", margin: 0 }} role="alert">
+          <p className="text-sm text-danger" role="alert">
             {error}
           </p>
         ) : null}
-        <button type="submit" disabled={pending} style={{ padding: "0.6rem" }}>
+        <Button type="submit" disabled={pending} className="w-full rounded-full">
           {pending ? "Joining…" : "Accept invite"}
-        </button>
+        </Button>
       </form>
-    </>
+    </div>
   );
 }

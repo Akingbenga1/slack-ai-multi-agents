@@ -1,6 +1,9 @@
-import { PageHeader } from "@/components/dashboard/PageHeader";
+import { AdminTenantBillingFrame } from "@/components/billing/AdminTenantBillingFrame";
 import { TransactionsPanel } from "@/components/billing/TransactionsPanel";
-import { getMockTenantBilling, getMockTransactions } from "@/lib/mock/billing-data";
+import {
+  getMockTenantBilling,
+  getMockTransactions,
+} from "@/lib/mock/billing-data";
 
 type Props = {
   params: Promise<{ tenantId: string }> | { tenantId: string };
@@ -12,19 +15,22 @@ export default async function AdminTenantTransactionsPage({ params }: Props) {
   const transactions = getMockTransactions(tenantId);
 
   return (
-    <>
-      <PageHeader
-        title="Transactions"
-        description={`Payment activity for ${billing.tenantName}.`}
-        breadcrumbs={[
-          { label: "Overview", href: "/admin" },
-          { label: "Tenants", href: "/admin/tenants" },
-          { label: billing.tenantName, href: `/admin/tenants/${tenantId}` },
-          { label: "Billing", href: `/admin/tenants/${tenantId}/billing` },
-          { label: "Transactions" },
-        ]}
+    <AdminTenantBillingFrame
+      tenantId={tenantId}
+      title="Transactions"
+      description={`Payment activity for ${billing.tenantName}.`}
+      breadcrumbs={[
+        { label: "Overview", href: "/admin" },
+        { label: "Tenants", href: "/admin/tenants" },
+        { label: billing.tenantName, href: `/admin/tenants/${tenantId}` },
+        { label: "Billing", href: `/admin/tenants/${tenantId}/billing` },
+        { label: "Transactions" },
+      ]}
+    >
+      <TransactionsPanel
+        transactions={transactions}
+        tenantName={billing.tenantName}
       />
-      <TransactionsPanel transactions={transactions} tenantName={billing.tenantName} />
-    </>
+    </AdminTenantBillingFrame>
   );
 }

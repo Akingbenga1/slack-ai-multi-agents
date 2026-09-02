@@ -1,9 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import panel from "@/components/dashboard/panel.module.css";
-import styles from "@/components/tools/tools.module.css";
+import { RefreshCw, Terminal } from "lucide-react";
 import { ApiError, apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   accessToken: string | null;
@@ -38,6 +47,9 @@ type SpecDraft = {
   install: string;
 };
 
+const inputClassName =
+  "w-full rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
 function errMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 401) return "Sign in to manage host CLI tools.";
@@ -52,6 +64,16 @@ function draftFromTool(tool: CliHostTool): SpecDraft {
     package: tool.package ?? "",
     install: tool.install ?? "",
   };
+}
+
+function installVariant(
+  st: HostStatus | undefined,
+): "success" | "warning" | "danger" | "muted" {
+  if (st?.busy) return "muted";
+  if (st?.installed === true) return "success";
+  if (st?.installed === false) return "warning";
+  if (st?.message) return "danger";
+  return "muted";
 }
 
 export function CliHostPanel({ accessToken, tenantId }: Props) {
@@ -272,206 +294,258 @@ export function CliHostPanel({ accessToken, tenantId }: Props) {
   }
 
   if (!accessToken) {
-    return <p className={panel.empty}>Sign in to check and install host CLI tools.</p>;
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-body-md text-muted-foreground">
+          Sign in to check and install host CLI tools.
+        </CardContent>
+      </Card>
+    );
   }
 
   if (tools === undefined) {
-    return <p className={panel.meta}>Loading CLI tools…</p>;
+    return (
+      <Card>
+        <CardContent className="space-y-2 py-8">
+          {Array.from({ length: 4 }, (_, key) => (
+            <div key={key} className="h-10 animate-pulse rounded-lg bg-muted" />
+          ))}
+        </CardContent>
+      </Card>
+    );
   }
 
   if (error) {
-    return <p className={panel.error}>{error}</p>;
-  }
-
-  if (!tools || tools.length === 0) {
     return (
-      <p className={panel.empty}>
-        No CLI tools in the registry yet. Register one under Tools, then return here to check or
-        install it on this host.
+      <p className="rounded-lg border border-danger-muted bg-danger-muted/40 px-4 py-3 text-body-md text-danger" role="alert">
+        {error}
       </p>
     );
   }
 
+  if (!tools || tools.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-body-md text-muted-foreground">
+          No CLI tools in the registry yet. Register one under Tools, then return here to check or
+          install it on this host.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <section>
-      <div className={panel.toolbar}>
-        <div className={panel.toolbarLeft}>
-          <button type="button" disabled={checkingAll} onClick={() => void load()}>
-            {checkingAll ? "Checking…" : "Refresh"}
-          </button>
-        </div>
-        <p className={panel.meta}>
-          {tools.length} CLI tool(s) · host {platform || "unknown"}
-          {installEnabled ? "" : " · install disabled"}
-          {checkingAll ? " · checking host…" : ""}
-        </p>
-      </div>
-
-      <p className={panel.infoBanner} role="note">
-        Status is checked when this page loads. Use Install spec when the default package id is
-        wrong (common with winget on Windows), then Install.
-      </p>
-
-      {note ? (
-        <p className={panel.infoBanner} role="status">
-          {note}
-        </p>
-      ) : null}
-
-      <div className={panel.tableWrap}>
-        <table className={panel.table}>
-          <thead>
-            <tr>
-              <th>Tool</th>
-              <th>Command</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tools.map((tool) => {
-              const st = statusByName[tool.name];
-              const busy = st?.busy;
-              const editing = editingName === tool.name;
-              const draft = draftByName[tool.name] ?? draftFromTool(tool);
-              let statusLabel = "Checking…";
-              let statusClass = panel.tableMuted;
-              if (busy === "install") {
-                statusLabel = "Installing…";
-              } else if (busy === "save") {
-                statusLabel = "Saving…";
-              } else if (busy === "delete") {
-                statusLabel = "Deleting…";
-              } else if (st?.installed === true) {
-                statusLabel = "Installed";
-                statusClass = styles.hostOk;
-              } else if (st?.installed === false) {
-                statusLabel = "Missing";
-                statusClass = styles.hostMissing;
-              } else if (st?.message) {
-                statusLabel = "Check failed";
-                statusClass = styles.hostMissing;
-              }
-              return (
-                <tr key={tool.id}>
-                  <td>
-                    <div className={styles.hostToolName}>{tool.name}</div>
-                    {tool.description ? (
-                      <div className={panel.tableMuted}>{tool.description}</div>
-                    ) : null}
-                    {tool.has_install_spec ? (
-                      <div className={styles.hostSpecHint}>
-                        Spec: <code>{tool.install || tool.package || "custom"}</code>
-                      </div>
-                    ) : (
-                      <div className={styles.hostSpecHintMuted}>No install spec yet</div>
-                    )}
-                    {editing ? (
-                      <div className={styles.hostSpecEditor}>
-                        <label className={styles.hostSpecLabel}>
-                          Package id
-                          <span className={styles.hostSpecHintMuted}>
-                            Used when Install command is empty (winget / brew / apt default)
-                          </span>
-                          <input
-                            value={draft.package}
-                            onChange={(ev) =>
-                              setDraftByName((prev) => ({
-                                ...prev,
-                                [tool.name]: { ...draft, package: ev.target.value },
-                              }))
-                            }
-                            placeholder="e.g. pngcheck or SomePublisher.Package"
-                            disabled={busy === "save"}
-                          />
-                        </label>
-                        <label className={styles.hostSpecLabel}>
-                          Install command
-                          <span className={styles.hostSpecHintMuted}>
-                            Full command, e.g. winget install -e --id Foo.Bar
-                            --accept-package-agreements
-                          </span>
-                          <input
-                            value={draft.install}
-                            onChange={(ev) =>
-                              setDraftByName((prev) => ({
-                                ...prev,
-                                [tool.name]: { ...draft, install: ev.target.value },
-                              }))
-                            }
-                            placeholder="winget install -e --id …"
-                            className={styles.monoInput}
-                            disabled={busy === "save"}
-                          />
-                        </label>
-                        <div className={styles.hostActions}>
-                          <button
-                            type="button"
-                            className={panel.btnPrimary}
-                            disabled={busy === "save"}
-                            onClick={() => void saveSpec(tool)}
-                          >
-                            {busy === "save" ? "Saving…" : "Save spec"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy === "save"}
-                            onClick={() => void saveSpec(tool, { clear: true })}
-                          >
-                            Clear
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy === "save"}
-                            onClick={closeSpecEditor}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <code>{tool.command ?? "—"}</code>
-                  </td>
-                  <td>
-                    <span className={statusClass}>{statusLabel}</span>
-                    {st?.message && st.installed !== true ? (
-                      <div className={styles.hostMsg}>{st.message}</div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <div className={styles.hostActions}>
-                      <button
-                        type="button"
-                        disabled={Boolean(busy)}
-                        onClick={() => (editing ? closeSpecEditor() : openSpecEditor(tool))}
-                      >
-                        {editing ? "Hide spec" : "Install spec"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={Boolean(busy) || !installEnabled || st?.installed === true}
-                        onClick={() => void onInstall(tool)}
-                      >
-                        {busy === "install" ? "Installing…" : "Install"}
-                      </button>
-                      <button
-                        type="button"
-                        className={panel.btnDanger}
-                        disabled={Boolean(busy)}
-                        onClick={() => void onDelete(tool)}
-                      >
-                        {busy === "delete" ? "Deleting…" : "Delete"}
-                      </button>
-                    </div>
-                  </td>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Terminal className="h-5 w-5" />
+              </span>
+              <div>
+                <CardTitle className="text-headline-md">CLI tools on host</CardTitle>
+                <CardDescription className="mt-1">
+                  {tools.length} CLI tool(s) · host {platform || "unknown"}
+                  {installEnabled ? "" : " · install disabled"}
+                  {checkingAll ? " · checking host…" : ""}. Use Install spec when the default
+                  package id is wrong, then Install.
+                </CardDescription>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-full"
+              disabled={checkingAll}
+              onClick={() => void load()}
+            >
+              <RefreshCw className={cn("h-4 w-4", checkingAll && "animate-spin")} />
+              {checkingAll ? "Checking…" : "Refresh"}
+            </Button>
+          </div>
+        </CardHeader>
+        {note ? (
+          <CardContent className="border-b border-border pt-6">
+            <p
+              className="rounded-lg border border-success/20 bg-success-muted px-4 py-3 text-body-md text-success"
+              role="status"
+            >
+              {note}
+            </p>
+          </CardContent>
+        ) : null}
+        <CardContent className="px-0 pb-0 pt-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[880px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-[#f8fafc]">
+                  <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                    Tool
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-label-md text-muted-foreground">
+                    Command
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-label-md text-muted-foreground">
+                    Status
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-right text-label-md text-muted-foreground">
+                    Actions
+                  </th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
+              </thead>
+              <tbody>
+                {tools.map((tool) => {
+                  const st = statusByName[tool.name];
+                  const busy = st?.busy;
+                  const editing = editingName === tool.name;
+                  const draft = draftByName[tool.name] ?? draftFromTool(tool);
+                  let statusLabel = "Checking…";
+                  if (busy === "install") statusLabel = "Installing…";
+                  else if (busy === "save") statusLabel = "Saving…";
+                  else if (busy === "delete") statusLabel = "Deleting…";
+                  else if (st?.installed === true) statusLabel = "Installed";
+                  else if (st?.installed === false) statusLabel = "Missing";
+                  else if (st?.message) statusLabel = "Check failed";
+                  return (
+                    <tr
+                      key={tool.id}
+                      className="border-b border-border last:border-b-0 align-top hover:bg-muted/40"
+                    >
+                      <td className="px-6 py-3">
+                        <p className="font-medium text-foreground">{tool.name}</p>
+                        {tool.description ? (
+                          <p className="mt-1 text-xs text-muted-foreground">{tool.description}</p>
+                        ) : null}
+                        {tool.has_install_spec ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Spec:{" "}
+                            <code className="rounded bg-muted px-1">
+                              {tool.install || tool.package || "custom"}
+                            </code>
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-xs text-muted-foreground">No install spec yet</p>
+                        )}
+                        {editing ? (
+                          <div className="mt-3 space-y-3 rounded-lg border border-border bg-[#f8fafc] p-4">
+                            <label className="block">
+                              <span className="text-xs font-medium text-foreground">
+                                Package id
+                              </span>
+                              <span className="mt-0.5 block text-xs text-muted-foreground">
+                                Used when Install command is empty
+                              </span>
+                              <input
+                                value={draft.package}
+                                onChange={(ev) =>
+                                  setDraftByName((prev) => ({
+                                    ...prev,
+                                    [tool.name]: { ...draft, package: ev.target.value },
+                                  }))
+                                }
+                                placeholder="e.g. pngcheck or SomePublisher.Package"
+                                disabled={busy === "save"}
+                                className={cn(inputClassName, "mt-2 font-mono text-[13px]")}
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-medium text-foreground">
+                                Install command
+                              </span>
+                              <input
+                                value={draft.install}
+                                onChange={(ev) =>
+                                  setDraftByName((prev) => ({
+                                    ...prev,
+                                    [tool.name]: { ...draft, install: ev.target.value },
+                                  }))
+                                }
+                                placeholder="winget install -e --id …"
+                                disabled={busy === "save"}
+                                className={cn(inputClassName, "mt-2 font-mono text-[13px]")}
+                              />
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={busy === "save"}
+                                onClick={() => void saveSpec(tool)}
+                              >
+                                {busy === "save" ? "Saving…" : "Save spec"}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={busy === "save"}
+                                onClick={() => void saveSpec(tool, { clear: true })}
+                              >
+                                Clear
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={busy === "save"}
+                                onClick={closeSpecEditor}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <code className="text-xs text-foreground">{tool.command ?? "—"}</code>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={installVariant(st)}>{statusLabel}</Badge>
+                        {st?.message && st.installed !== true ? (
+                          <p className="mt-2 text-xs text-danger">{st.message}</p>
+                        ) : null}
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={Boolean(busy)}
+                            onClick={() => (editing ? closeSpecEditor() : openSpecEditor(tool))}
+                          >
+                            {editing ? "Hide spec" : "Install spec"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={Boolean(busy) || !installEnabled || st?.installed === true}
+                            onClick={() => void onInstall(tool)}
+                          >
+                            {busy === "install" ? "Installing…" : "Install"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-danger hover:text-danger"
+                            disabled={Boolean(busy)}
+                            onClick={() => void onDelete(tool)}
+                          >
+                            {busy === "delete" ? "Deleting…" : "Delete"}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

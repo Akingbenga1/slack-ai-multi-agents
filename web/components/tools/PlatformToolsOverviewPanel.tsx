@@ -1,6 +1,10 @@
 import Link from "next/link";
-import panel from "@/components/dashboard/panel.module.css";
+import { Plus, Server, Users, Wrench } from "lucide-react";
 import { getMockPlatformToolsOverview } from "@/lib/mock/tools-data";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export function PlatformToolsOverviewPanel() {
   const rows = getMockPlatformToolsOverview();
@@ -8,67 +12,116 @@ export function PlatformToolsOverviewPanel() {
   const totalMcp = rows.reduce((sum, r) => sum + r.mcpServerCount, 0);
 
   return (
-    <>
-      <div className={panel.metrics}>
-        <div className={panel.metric}>
-          <p className={panel.metricLabel}>Tools</p>
-          <p className={panel.metricValue}>{totalTools}</p>
-        </div>
-        <div className={panel.metric}>
-          <p className={panel.metricLabel}>MCP servers</p>
-          <p className={panel.metricValue}>{totalMcp}</p>
-        </div>
-        <div className={panel.metric}>
-          <p className={panel.metricLabel}>Tenants</p>
-          <p className={panel.metricValue}>{rows.length}</p>
-        </div>
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-label-md text-muted-foreground">Tools</p>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Wrench className="h-4 w-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-headline-md text-foreground">{totalTools}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-label-md text-muted-foreground">MCP servers</p>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Server className="h-4 w-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-headline-md text-foreground">{totalMcp}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-label-md text-muted-foreground">Tenants</p>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Users className="h-4 w-4" />
+              </div>
+            </div>
+            <p className="mt-3 text-headline-md text-foreground">{rows.length}</p>
+          </CardContent>
+        </Card>
       </div>
 
-      <section className={panel.section}>
-        <div className={panel.sectionHeader}>
-          <h2 className={panel.sectionTitle}>Tools by tenant</h2>
-          <span className={panel.sectionCount}>{rows.length}</span>
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-6 py-5">
+          <div>
+            <h2 className="text-headline-md text-foreground">Tools by tenant</h2>
+            <p className="mt-1 text-body-md text-muted-foreground">
+              Open a tenant to register CLI tools, MCP servers, and tool metadata.
+            </p>
+          </div>
+          <Badge variant="muted">{rows.length}</Badge>
         </div>
-        <p className={panel.sectionDesc}>
-          Open a tenant to register CLI tools, MCP servers, and tool metadata.
-        </p>
-        <div className={panel.tableWrap}>
-          <table className={panel.table}>
-            <thead>
-              <tr>
-                <th scope="col">Tenant</th>
-                <th scope="col">Tools</th>
-                <th scope="col">MCP servers</th>
-                <th scope="col">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.tenantId}>
-                  <td>
-                    <Link
-                      href={`/admin/tenants/${row.tenantId}/tools`}
-                      className={panel.tableLink}
-                    >
-                      {row.tenantName}
-                    </Link>
-                    <div className={panel.tableMuted}>{row.tenantSlug}</div>
-                  </td>
-                  <td>{row.toolCount}</td>
-                  <td>{row.mcpServerCount}</td>
-                  <td>
-                    <Link href={`/admin/tenants/${row.tenantId}/tools`}>Manage</Link>
-                    {" · "}
-                    <Link href={`/admin/tenants/${row.tenantId}/tools/new`}>New tool</Link>
-                  </td>
+        <CardContent className="px-0 pb-0 pt-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-[#f8fafc]">
+                  <th scope="col" className="px-6 py-3 text-label-md text-muted-foreground">
+                    Tenant
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-label-md text-muted-foreground">
+                    Tools
+                  </th>
+                  <th scope="col" className="px-4 py-3 text-label-md text-muted-foreground">
+                    MCP servers
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-right text-label-md text-muted-foreground">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row.tenantId}
+                    className="border-b border-border last:border-b-0 hover:bg-muted/40"
+                  >
+                    <td className="px-6 py-3">
+                      <Link
+                        href={`/admin/tenants/${row.tenantId}/tools`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {row.tenantName}
+                      </Link>
+                      <p className="mt-1 text-xs text-muted-foreground">{row.tenantSlug}</p>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{row.toolCount}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{row.mcpServerCount}</td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Link
+                          href={`/admin/tenants/${row.tenantId}/tools`}
+                          className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+                        >
+                          Manage
+                        </Link>
+                        <Link
+                          href={`/admin/tenants/${row.tenantId}/tools/new`}
+                          className={cn(
+                            buttonVariants({ variant: "default", size: "sm" }),
+                            "rounded-full",
+                          )}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          New tool
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

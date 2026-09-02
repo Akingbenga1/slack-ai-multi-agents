@@ -12,7 +12,7 @@ Next.js self-serve surfaces for org admins. Demo seed (`admin@example.com` / `ad
 | `/app/invite` | Create / list invite links (org admin portal) |
 | `/app` | Portal home |
 | `/app/agent` | Agent name, system prompt, channel allowlist, job schedules (OR-03 / OR-04) |
-| `/app/knowledge` | Uploads, ingest job status, Slack sync trigger/status (OR-05 / OR-06) |
+| `/app/knowledge` | Uploads, ingest job status, tenant file listing, Slack sync trigger/status (OR-05 / OR-06) |
 | `/app/billing` | Pay / manage subscription (OR-02) |
 | `/app/usage` | Usage summary + recent logs (OR-07) |
 | `/app/slack` | Connect Slack workspace + connection status (OR-08) |
@@ -28,6 +28,7 @@ Next.js self-serve surfaces for org admins. Demo seed (`admin@example.com` / `ad
 | Recurring report schedule (legacy) | `GET` / `PATCH /jobs/recurring-report/schedule` |
 | Upload | `POST /uploads` |
 | Ingest status | `GET /uploads/jobs`, `GET /uploads/status/{upload_id}` |
+| Tenant files | `GET /tenant-files`, `GET /tenant-files/content?key=…` (see `docs/tenant-files.md`) |
 | Live sync | `GET /jobs/slack-history-sync/status`, `POST /jobs/slack-history-sync` |
 | Billing | `GET /billing/customers/me`, `POST /billing/checkout-session`, `POST /billing/portal-session` |
 | Usage / logs | `GET /usage/summary`, `GET /usage/events`, `GET /usage/jobs` |

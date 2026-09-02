@@ -14,7 +14,7 @@ export default async function AdminTenantCreatePage() {
         breadcrumbs={[
           { label: "Overview", href: "/admin" },
           { label: "Tenants", href: "/admin/tenants" },
-          { label: "New" },
+          { label: "New tenant" },
         ]}
       />
       <TenantCreateForm accessToken={session?.accessToken ?? null} />

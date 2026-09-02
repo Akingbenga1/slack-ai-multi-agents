@@ -18,6 +18,13 @@ from api.app.auth.invites import (
     list_invites,
     preview_invite,
 )
+from api.app.auth.members import (
+    MemberError,
+    list_tenant_members,
+    member_public_row,
+    remove_tenant_member,
+    revoke_invite,
+)
 from api.app.auth.provider import get_identity_provider
 from api.app.auth.signup import register_organisation
 from api.app.auth.tokens import (
@@ -95,6 +102,17 @@ def _invite_http_error(exc: InviteError) -> HTTPException:
     if "not found" in msg:
         code = status.HTTP_404_NOT_FOUND
     elif "already" in msg:
+        code = status.HTTP_409_CONFLICT
+    else:
+        code = status.HTTP_400_BAD_REQUEST
+    return HTTPException(status_code=code, detail=msg)
+
+
+def _member_http_error(exc: MemberError) -> HTTPException:
+    msg = str(exc)
+    if "not found" in msg:
+        code = status.HTTP_404_NOT_FOUND
+    elif "cannot remove" in msg or "already used" in msg:
         code = status.HTTP_409_CONFLICT
     else:
         code = status.HTTP_400_BAD_REQUEST
@@ -308,6 +326,57 @@ def list_org_invites(
     tenant_id = _org_tenant_id(principal)
     rows = list_invites(db, tenant_id=tenant_id)
     return {"invites": [invite_public_row(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/members")
+def list_org_members(
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """List org admins with access to the current tenant."""
+    tenant_id = _org_tenant_id(principal)
+    rows = list_tenant_members(db, tenant_id=tenant_id)
+    return {"members": [member_public_row(r) for r in rows], "count": len(rows)}
+
+
+@router.delete("/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def remove_org_member(
+    user_id: UUID,
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Remove a user's access to the current tenant."""
+    tenant_id = _org_tenant_id(principal)
+    try:
+        remove_tenant_member(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor_user_id=principal.sub,
+            actor_email=principal.email,
+        )
+    except MemberError as exc:
+        raise _member_http_error(exc) from exc
+
+
+@router.delete("/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def revoke_org_invite(
+    invite_id: UUID,
+    principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Revoke a pending invite for the current tenant."""
+    tenant_id = _org_tenant_id(principal)
+    try:
+        revoke_invite(
+            db,
+            tenant_id=tenant_id,
+            invite_id=invite_id,
+            actor_user_id=principal.sub,
+            actor_email=principal.email,
+        )
+    except MemberError as exc:
+        raise _member_http_error(exc) from exc
 
 
 @router.get("/invites/preview")

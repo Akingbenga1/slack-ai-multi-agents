@@ -162,3 +162,40 @@ export const apiClient = {
     return request<T>("DELETE", path, opts);
   },
 };
+
+export type DownloadFileOptions = {
+  accessToken: string;
+  clientId?: string | null;
+  /** Suggested filename for the browser save dialog. */
+  filename: string;
+};
+
+/** Fetch an authenticated file and trigger a browser download. */
+export async function downloadAuthenticatedFile(
+  path: string,
+  opts: DownloadFileOptions,
+): Promise<void> {
+  const res = await fetch(joinUrl(path), {
+    headers: apiAuthHeaders(opts.accessToken, opts.clientId),
+  });
+
+  if (!res.ok) {
+    const payload = await readBody(res);
+    throw new ApiError(
+      detailFromBody(payload, res.statusText || `HTTP ${res.status}`),
+      res.status,
+      payload,
+    );
+  }
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = opts.filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}

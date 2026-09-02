@@ -87,9 +87,11 @@ def test_list_usage_events_filters(db: Session):
     record_usage(db, t.id, EVENT_SLACK_MENTION, units=1, commit=False)
     record_usage(db, t.id, EVENT_LLM_TOKENS, units=10, commit=False)
     db.commit()
-    all_rows = list_usage_events(db, t.id, limit=10)
+    all_rows, all_total = list_usage_events(db, t.id, limit=10)
+    assert all_total == 2
     assert len(all_rows) == 2
-    mentions = list_usage_events(db, t.id, event_type=EVENT_SLACK_MENTION)
+    mentions, mention_total = list_usage_events(db, t.id, event_type=EVENT_SLACK_MENTION)
+    assert mention_total == 1
     assert len(mentions) == 1
     assert mentions[0].event_type == EVENT_SLACK_MENTION
 
@@ -112,7 +114,8 @@ def test_list_jobs_failed_only(db: Session):
         )
     )
     db.commit()
-    failed = list_jobs(db, t.id, status="failed")
+    failed, total = list_jobs(db, t.id, status="failed")
+    assert total == 1
     assert len(failed) == 1
     assert failed[0].error == "boom"
 
@@ -127,6 +130,7 @@ def test_usage_events_api_ok(client: TestClient, db: Session):
     assert res.status_code == 200
     body = res.json()
     assert body["tenant_id"] == str(t.id)
+    assert body["total"] == 1
     assert len(body["events"]) == 1
     assert body["events"][0]["event_type"] == EVENT_SLACK_MENTION
 
@@ -149,6 +153,7 @@ def test_usage_jobs_api_ok(client: TestClient, db: Session):
     )
     assert res.status_code == 200
     body = res.json()
+    assert body["total"] == 1
     assert len(body["jobs"]) == 1
     assert body["jobs"][0]["error"] == "parse failed"
 

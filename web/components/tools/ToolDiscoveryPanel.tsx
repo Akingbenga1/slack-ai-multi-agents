@@ -1,9 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { Search } from "lucide-react";
 import { ApiError, apiClient } from "@/lib/api";
-import panel from "@/components/dashboard/panel.module.css";
-import styles from "@/components/tools/tools.module.css";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export type DiscoveredTool = {
   id: string;
@@ -28,6 +35,9 @@ type Props = {
 
 const CLI_DISCOVERY_PATH = "/discovery/cli-tools";
 
+const inputClassName =
+  "min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
 function cliCommandFromConfig(tool: DiscoveredTool): string | null {
   const config = tool.config;
   if (!config || typeof config !== "object") return null;
@@ -35,7 +45,6 @@ function cliCommandFromConfig(tool: DiscoveredTool): string | null {
   return typeof command === "string" && command.trim() ? command.trim() : null;
 }
 
-/** Subcommand descriptions only (purpose) — never usage / command examples. */
 function cliSubcommandDescriptions(tool: DiscoveredTool): string[] {
   const config = tool.config;
   if (!config || typeof config !== "object") return [];
@@ -171,116 +180,136 @@ export function ToolDiscoveryPanel({ accessToken = null, onSelect }: Props) {
   }
 
   return (
-    <section className={styles.workspaceCard} aria-labelledby="tool-discovery-cli">
-      <div className={styles.cardHead}>
-        <div>
-          <h2 className={styles.cardTitle} id="tool-discovery-cli">
-            CLI tool discovery
-          </h2>
-          <p className={styles.cardDesc}>
-            Search the local tldr catalog via <code>/discovery/cli-tools</code> and pick a
-            command to configure.
-          </p>
-        </div>
-      </div>
-
-      <form className={styles.discoveryForm} onSubmit={(ev) => void onDiscover(ev)}>
-        <label className={panel.formLabel}>
-          Search query
-          <span className={panel.formHint}>Describe the capability you want to find</span>
-          <div className={styles.discoverySearchRow}>
-            <input
-              value={query}
-              onChange={(ev) => setQuery(ev.target.value)}
-              placeholder="e.g. create png images, csv export, pdf convert"
-              aria-label="CLI tool discovery query"
-              maxLength={512}
-            />
-            <button
-              type="submit"
-              className={panel.btnPrimary}
-              disabled={searching || !query.trim()}
-            >
-              {searching ? "Searching…" : "Discover"}
-            </button>
-          </div>
-        </label>
-      </form>
-
-      {error ? (
-        <p className={panel.error} role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      {searched && !searching ? (
-        <div className={styles.discoveryResults}>
-          {!error && results.length === 0 ? (
-            <div className={styles.discoveryEmpty}>
-              <p className={styles.discoveryEmptyTitle}>No matches</p>
-              <p className={panel.meta}>No CLI tools found for “{query.trim()}”.</p>
+    <Card aria-labelledby="tool-discovery-cli">
+      <CardHeader className="border-b border-border">
+        <CardTitle id="tool-discovery-cli" className="text-headline-md">
+          CLI tool discovery
+        </CardTitle>
+        <CardDescription>
+          Search the local tldr catalog via{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">
+            /discovery/cli-tools
+          </code>{" "}
+          and pick a command to configure.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        <form onSubmit={(ev) => void onDiscover(ev)}>
+          <label className="block">
+            <span className="text-sm font-medium text-foreground">Search query</span>
+            <span className="mt-1 block text-sm text-muted-foreground">
+              Describe the capability you want to find
+            </span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                value={query}
+                onChange={(ev) => setQuery(ev.target.value)}
+                placeholder="e.g. create png images, csv export, pdf convert"
+                aria-label="CLI tool discovery query"
+                maxLength={512}
+                className={inputClassName}
+              />
+              <Button
+                type="submit"
+                className="rounded-full"
+                disabled={searching || !query.trim()}
+              >
+                <Search className="h-4 w-4" />
+                {searching ? "Searching…" : "Discover"}
+              </Button>
             </div>
-          ) : null}
-          {results.length > 0 ? (
-            <>
-              <p className={styles.discoveryResultCount} aria-live="polite">
-                {results.length === 1 ? "1 CLI tool" : `${results.length} CLI tools`}
-              </p>
-              <ul className={styles.discoveryList}>
-                {results.map((tool) => {
-                  const extra = metadataLine(tool);
-                  const command = cliCommandFromConfig(tool);
-                  const subcommands = cliSubcommandDescriptions(tool);
-                  return (
-                    <li key={tool.id} className={styles.discoveryItem}>
-                      <div>
-                        <p className={styles.discoveryItemTitle}>{tool.name}</p>
-                        <p className={styles.discoveryItemText}>
-                          {tool.summary || "No description"}
-                        </p>
-                        {command ? (
-                          <p className={styles.discoveryCommand}>
-                            <code>{command}</code>
+          </label>
+        </form>
+
+        {error ? (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        {searched && !searching ? (
+          <div className="space-y-3">
+            {!error && results.length === 0 ? (
+              <div className="rounded-lg border border-border bg-[#f8fafc] px-4 py-6 text-center">
+                <p className="font-medium text-foreground">No matches</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  No CLI tools found for “{query.trim()}”.
+                </p>
+              </div>
+            ) : null}
+            {results.length > 0 ? (
+              <>
+                <p className="text-sm text-muted-foreground" aria-live="polite">
+                  {results.length === 1 ? "1 CLI tool" : `${results.length} CLI tools`}
+                </p>
+                <ul className="space-y-3">
+                  {results.map((tool) => {
+                    const extra = metadataLine(tool);
+                    const command = cliCommandFromConfig(tool);
+                    const subcommands = cliSubcommandDescriptions(tool);
+                    return (
+                      <li
+                        key={tool.id}
+                        className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-4 hover:bg-muted/30"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-foreground">{tool.name}</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {tool.summary || "No description"}
                           </p>
-                        ) : null}
-                        {subcommands.length > 0 ? (
-                          <div className={styles.discoverySubcommands}>
-                            <p className={styles.discoverySubcommandsLabel}>
-                              Subcommands
+                          {command ? (
+                            <p className="mt-2">
+                              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                                {command}
+                              </code>
                             </p>
-                            <ul className={styles.discoverySubcommandsList}>
-                              {subcommands.map((desc) => (
-                                <li key={desc}>{desc}</li>
-                              ))}
-                            </ul>
-                          </div>
+                          ) : null}
+                          {subcommands.length > 0 ? (
+                            <div className="mt-2">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Subcommands
+                              </p>
+                              <ul className="mt-1 list-inside list-disc text-sm text-muted-foreground">
+                                {subcommands.map((desc) => (
+                                  <li key={desc}>{desc}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {tool.source}
+                            {extra ? ` · ${extra}` : ""}
+                          </p>
+                        </div>
+                        {onSelect ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="shrink-0 rounded-full"
+                            onClick={() => onSelect(tool)}
+                          >
+                            Use
+                          </Button>
                         ) : null}
-                        <p className={panel.meta}>
-                          {tool.source}
-                          {extra ? ` · ${extra}` : ""}
-                        </p>
-                      </div>
-                      {onSelect ? (
-                        <button type="button" onClick={() => onSelect(tool)}>
-                          Use
-                        </button>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          ) : null}
-        </div>
-      ) : searching ? (
-        <div className={styles.discoveryIdle}>
-          <p className={panel.meta}>Searching CLI tools…</p>
-        </div>
-      ) : (
-        <div className={styles.discoveryIdle}>
-          <p className={panel.meta}>Enter a query to search available CLI tools.</p>
-        </div>
-      )}
-    </section>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : searching ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }, (_, key) => (
+              <div key={key} className="h-16 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Enter a query to search available CLI tools.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

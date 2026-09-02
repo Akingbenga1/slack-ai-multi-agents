@@ -2,7 +2,6 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
 import { AgentSettingsPanel } from "@/components/AgentSettingsPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -18,17 +17,15 @@ export default async function AgentSettingsPage() {
         breadcrumbs={[
           { label: "Overview", href: "/app" },
           { label: "Agent" },
-        ]}
-      />
-      <p className={panel.infoBanner}>
+        ]} />
+      <p>
         Register CLI and MCP tools on the{" "}
         <Link href="/app/tools">Tools</Link> page.
       </p>
-      <div className={panel.section}>
+      <div>
         <AgentSettingsPanel
           accessToken={session?.accessToken ?? null}
-          tenantId={tenantId}
-        />
+          tenantId={tenantId} />
       </div>
     </>
   );

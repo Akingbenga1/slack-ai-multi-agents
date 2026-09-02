@@ -88,12 +88,15 @@ Details: `docs/billing.md`. Webhook URL: `{PUBLIC_BASE_URL}/billing/webhooks/str
 | Env | Purpose |
 | --- | ------- |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | Install |
-| `SLACK_SIGNING_SECRET` | Events verify |
+| `SLACK_SIGNING_SECRET` | HTTP Events verify |
+| `SLACK_EVENTS_TRANSPORT` | `http` (default) or `socket` |
+| `SLACK_APP_TOKEN` | Socket Mode app token (`xapp-…`) when transport is `socket` |
 
 Checklist: `docs/slack-app-setup.md`. Live Web API sync: `docs/slack-web-api.md`.
 
-- Events: `{PUBLIC_BASE_URL}/slack/events`
-- Install: `{PUBLIC_BASE_URL}/slack/install?tenant_id=<DEMO_TENANT_ID>`
+- **HTTP Events:** `{PUBLIC_BASE_URL}/slack/events` (needs tunnel)
+- **Socket Mode:** no events tunnel; enable in Slack app + set env vars; listener starts with API
+- **OAuth (both modes):** `{PUBLIC_BASE_URL}/slack/oauth/callback` or portal **Connect Slack**
 - Optional seed fixture: `DEMO_SLACK_TEAM_ID` + `DEMO_SLACK_BOT_TOKEN`
 
 ## 7. TEI / Qdrant / retrieval

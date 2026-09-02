@@ -2,7 +2,6 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import styles from "@/components/dashboard/dashboard.module.css";
 import {
   IconAgent,
   IconBilling,
@@ -13,6 +12,7 @@ import {
   IconWorkflows,
 } from "@/components/dashboard/icons";
 import { PortalStatusBanners } from "@/components/PortalStatusBanners";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { sessionTenantId } from "@/lib/tenant";
 
 const LINKS = [
@@ -67,6 +67,7 @@ export default async function OrgAppHome() {
   return (
     <>
       <PageHeader
+        className="mb-8"
         title="Overview"
         description="Configure your agent, upload knowledge, and review usage — without waiting on the platform owner."
       />
@@ -74,21 +75,36 @@ export default async function OrgAppHome() {
         accessToken={session?.accessToken ?? null}
         tenantId={tenantId}
       />
-      <div className={styles.cardGrid}>
-        {LINKS.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`${styles.statCard} ${styles.statCardLink}`}
-          >
-            <span className={styles.statCardIcon}>
-              <item.icon size={22} />
-            </span>
-            <h2 className={styles.statCardTitle}>{item.title}</h2>
-            <p className={styles.statCardText}>{item.text}</p>
-          </Link>
-        ))}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick access</CardTitle>
+          <CardDescription>
+            Jump to agent setup, knowledge, billing, Slack, and other org settings.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {LINKS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group flex flex-col items-center rounded-lg border border-border bg-card px-3 py-5 text-center transition-colors hover:border-primary/30 hover:bg-muted"
+                >
+                  <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-[#f2f4f6] text-primary">
+                    <Icon size={20} />
+                  </span>
+                  <span className="text-sm font-medium text-foreground">{item.title}</span>
+                  <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {item.text}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
     </>
   );
 }

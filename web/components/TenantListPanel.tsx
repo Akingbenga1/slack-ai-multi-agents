@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import panel from "@/components/dashboard/panel.module.css";
+import { useMemo, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { TenantRowMenu } from "@/components/dashboard/TenantRowMenu";
 import { ApiError, apiClient } from "@/lib/api";
 import { useAuthenticatedResource } from "@/lib/useAuthenticatedResource";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export type TenantSummary = {
   id: string;
@@ -24,6 +28,7 @@ export type TenantSummary = {
 
 type Props = {
   accessToken: string | null;
+  query?: string;
 };
 
 type PendingPlanAction = {
@@ -38,15 +43,17 @@ type PendingStatusAction = {
   status: "active" | "suspended";
 };
 
-function statusBadge(status: string): string {
-  if (status === "active") return panel.badgeOk;
-  if (status === "suspended") return panel.badgeError;
-  return panel.badgeNeutral;
-}
+const AVATAR_COLORS = [
+  "bg-[#ecfdf5] text-[#006c49]",
+  "bg-[#e0e7ff] text-[#4648d3]",
+  "bg-[#fef9c3] text-[#854d0e]",
+  "bg-[#fee2e2] text-[#991b1b]",
+  "bg-[#f1f5f9] text-[#475569]",
+];
 
-function planBadge(plan: string): string {
-  if (plan === "active") return panel.badgeOk;
-  return panel.badgeWarn;
+function avatarColor(name: string): string {
+  const code = name.trim().charCodeAt(0) || 0;
+  return AVATAR_COLORS[code % AVATAR_COLORS.length];
 }
 
 function formatWhen(iso: string | null | undefined): string {
@@ -62,6 +69,20 @@ function formatWhen(iso: string | null | undefined): string {
   }
 }
 
+function formatRelativeSync(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 function planLabel(planStatus: string, planSource?: string): string {
   const source = (planSource || "stripe").toLowerCase();
   if (planStatus === "active" && source === "admin") return "active · waived";
@@ -69,7 +90,37 @@ function planLabel(planStatus: string, planSource?: string): string {
   return planStatus;
 }
 
-export function TenantListPanel({ accessToken }: Props) {
+function statusVariant(status: string): "success" | "warning" | "danger" | "muted" {
+  if (status === "active") return "success";
+  if (status === "suspended") return "danger";
+  return "muted";
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={statusVariant(status)} className="gap-1.5 capitalize">
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" aria-hidden />
+      {status}
+    </Badge>
+  );
+}
+
+function TenantAvatar({ name }: { name: string }) {
+  const initial = (name.trim()[0] ?? "?").toUpperCase();
+  return (
+    <span
+      className={cn(
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold",
+        avatarColor(name),
+      )}
+      aria-hidden
+    >
+      {initial}
+    </span>
+  );
+}
+
+export function TenantListPanel({ accessToken, query = "" }: Props) {
   const {
     data: tenants,
     error: loadError,
@@ -94,7 +145,15 @@ export function TenantListPanel({ accessToken }: Props) {
   const [planReason, setPlanReason] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const tenantList = tenants || [];
+  const tenantList = useMemo(() => {
+    const all = tenants || [];
+    if (!query) return all;
+    return all.filter(
+      (tenant) =>
+        tenant.name.toLowerCase().includes(query) ||
+        tenant.slug.toLowerCase().includes(query),
+    );
+  }, [tenants, query]);
 
   function clearPending() {
     setPendingPlan(null);
@@ -187,215 +246,269 @@ export function TenantListPanel({ accessToken }: Props) {
   }
 
   const rowBusy = busyId !== null;
+  const totalCount = tenants?.length ?? 0;
+  const visibleCount = tenantList.length;
 
   return (
     <section aria-busy={loading || rowBusy}>
-      <div className={panel.toolbar}>
-        <div className={panel.toolbarLeft}>
-          <Link href="/admin/tenants/new">
-            <button type="button">New tenant</button>
-          </Link>
-          <button type="button" onClick={() => void load()} disabled={loading || rowBusy}>
-            {loading ? "Loading…" : "Refresh"}
-          </button>
-        </div>
-        {tenantList.length > 0 ? (
-          <p className={panel.meta}>{tenantList.length} organisation(s)</p>
-        ) : null}
-      </div>
-
       {loadError ? (
-        <p className={panel.error} role="alert">
+        <p className="mb-4 text-body-md text-destructive" role="alert">
           {loadError}
         </p>
       ) : null}
 
       {actionError ? (
-        <p className={panel.error} role="alert">
+        <p className="mb-4 rounded-lg border border-danger-muted bg-danger-muted/40 px-4 py-3 text-body-md text-danger" role="alert">
           {actionError}
         </p>
       ) : null}
 
       {actionMessage ? (
-        <p className={panel.success} role="status">
+        <p className="mb-4 rounded-lg border border-success-muted bg-success-muted/40 px-4 py-3 text-body-md text-success" role="status">
           {actionMessage}
         </p>
       ) : null}
 
       {pendingPlan ? (
-        <div className={panel.confirmBanner} role="dialog" aria-labelledby="plan-confirm-title">
-          <p id="plan-confirm-title" className={panel.confirmTitle}>
-            {pendingPlan.planStatus === "inactive"
-              ? `Deactivate plan for ${pendingPlan.tenantName}`
-              : `Waive payment for ${pendingPlan.tenantName}`}
-          </p>
-          <p className={panel.confirmDesc}>
-            {pendingPlan.planStatus === "inactive"
-              ? "Sets plan to inactive and restores Stripe webhook control. Entitlements stop until paid again."
-              : "Sets plan to active with an admin waiver — no Stripe payment required."}
-          </p>
-          <label className={panel.formLabel}>
-            Reason (required, audited)
-            <input
-              value={planReason}
-              onChange={(ev) => setPlanReason(ev.target.value)}
-              placeholder="e.g. partner trial, support waiver, billing dispute"
-              autoFocus
-            />
-          </label>
-          <div className={panel.formRow}>
-            <button
-              type="button"
-              className={panel.btnPrimary}
-              disabled={rowBusy || !planReason.trim()}
-              onClick={() => void confirmPlanAction()}
-            >
-              {rowBusy ? "Saving…" : "Confirm plan change"}
-            </button>
-            <button type="button" disabled={rowBusy} onClick={clearPending}>
-              Cancel
-            </button>
-          </div>
-        </div>
+        <Card className="mb-6">
+          <CardContent className="space-y-4 py-6">
+            <div>
+              <p id="plan-confirm-title" className="text-headline-md text-foreground">
+                {pendingPlan.planStatus === "inactive"
+                  ? `Deactivate plan for ${pendingPlan.tenantName}`
+                  : `Waive payment for ${pendingPlan.tenantName}`}
+              </p>
+              <p className="mt-2 text-body-md text-muted-foreground">
+                {pendingPlan.planStatus === "inactive"
+                  ? "Sets plan to inactive and restores Stripe webhook control. Entitlements stop until paid again."
+                  : "Sets plan to active with an admin waiver — no Stripe payment required."}
+              </p>
+            </div>
+            <label className="block text-body-md text-foreground">
+              Reason (required, audited)
+              <input
+                value={planReason}
+                onChange={(ev) => setPlanReason(ev.target.value)}
+                placeholder="e.g. partner trial, support waiver, billing dispute"
+                autoFocus
+                className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-body-md outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                disabled={rowBusy || !planReason.trim()}
+                onClick={() => void confirmPlanAction()}
+              >
+                {rowBusy ? "Saving…" : "Confirm plan change"}
+              </Button>
+              <Button type="button" variant="secondary" disabled={rowBusy} onClick={clearPending}>
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {pendingStatus ? (
-        <div className={panel.confirmBanner} role="dialog" aria-labelledby="status-confirm-title">
-          <p id="status-confirm-title" className={panel.confirmTitle}>
-            {pendingStatus.status === "suspended"
-              ? `Suspend ${pendingStatus.tenantName}?`
-              : `Unsuspend ${pendingStatus.tenantName}?`}
-          </p>
-          <p className={panel.confirmDesc}>
-            {pendingStatus.status === "suspended"
-              ? "Suspension blocks all tenant usage immediately."
-              : "Restores tenant access while plan billing rules still apply."}
-          </p>
-          <div className={panel.formRow}>
-            <button
-              type="button"
-              className={pendingStatus.status === "suspended" ? panel.btnDanger : panel.btnPrimary}
-              disabled={rowBusy}
-              onClick={() => void confirmStatusAction()}
-            >
-              {rowBusy ? "Saving…" : "Confirm"}
-            </button>
-            <button type="button" disabled={rowBusy} onClick={clearPending}>
-              Cancel
-            </button>
-          </div>
-        </div>
+        <Card className="mb-6">
+          <CardContent className="space-y-4 py-6">
+            <div>
+              <p id="status-confirm-title" className="text-headline-md text-foreground">
+                {pendingStatus.status === "suspended"
+                  ? `Suspend ${pendingStatus.tenantName}?`
+                  : `Unsuspend ${pendingStatus.tenantName}?`}
+              </p>
+              <p className="mt-2 text-body-md text-muted-foreground">
+                {pendingStatus.status === "suspended"
+                  ? "Suspension blocks all tenant usage immediately."
+                  : "Restores tenant access while plan billing rules still apply."}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={pendingStatus.status === "suspended" ? "destructive" : "default"}
+                disabled={rowBusy}
+                onClick={() => void confirmStatusAction()}
+              >
+                {rowBusy ? "Saving…" : "Confirm"}
+              </Button>
+              <Button type="button" variant="secondary" disabled={rowBusy} onClick={clearPending}>
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
-      <section className={panel.section}>
-        <div className={panel.sectionHeader}>
-          <h2 className={panel.sectionTitle}>All tenants</h2>
-          <span className={panel.sectionCount}>{tenantList.length}</span>
+      <Card>
+        <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
+          <div>
+            <h2 className="text-headline-md text-foreground">All tenants</h2>
+            <p className="mt-1 text-body-md text-muted-foreground">
+              Click a tenant name to open details. Use the row menu (⋯) for billing and access
+              actions.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void load()}
+            disabled={loading || rowBusy}
+          >
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            {loading ? "Loading…" : "Refresh"}
+          </Button>
         </div>
-        <p className={panel.sectionDesc}>
-          Click a tenant name to open details. Use the row menu (⋯) for billing and access actions.
-        </p>
 
         {loading && tenants === undefined ? (
-          <div className={`${panel.skeleton} ${panel.skeletonBlock}`} />
+          <CardContent>
+            <div className="space-y-3">
+              {[0, 1, 2].map((key) => (
+                <div key={key} className="h-14 animate-pulse rounded-lg bg-muted" />
+              ))}
+            </div>
+          </CardContent>
         ) : tenantList.length > 0 ? (
-          <div className={`${panel.tableWrap} ${openMenuId ? panel.tableWrapMenuOpen : ""}`}>
-            <table className={panel.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Plan</th>
-                  <th scope="col">Slack</th>
-                  <th scope="col">Created</th>
-                  <th scope="col">Last sync</th>
-                  <th scope="col" className={panel.actionsCell}>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {tenantList.map((t) => {
-                  const planSource = (t.plan_source || "stripe").toLowerCase();
-                  const canWaive =
-                    t.plan_status !== "active" ||
-                    (t.plan_status === "active" && planSource !== "admin");
-                  const canDeactivate = t.plan_status === "active";
-                  const isRowBusy = busyId === t.id;
-                  const menuDisabled =
-                    rowBusy ||
-                    isRowBusy ||
-                    pendingPlan !== null ||
-                    pendingStatus !== null;
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-body-md">
+                <thead>
+                  <tr className="border-b border-border bg-[#f8fafc]">
+                    <th scope="col" className="px-6 py-3 text-left text-label-md text-muted-foreground">
+                      Name
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-label-md text-muted-foreground">
+                      Status
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-label-md text-muted-foreground">
+                      Plan
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-label-md text-muted-foreground">
+                      Slack
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-label-md text-muted-foreground">
+                      Created
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-label-md text-muted-foreground">
+                      Last sync
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-right text-label-md text-muted-foreground">
+                      <span className="sr-only">Actions</span>
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tenantList.map((t) => {
+                    const planSource = (t.plan_source || "stripe").toLowerCase();
+                    const canWaive =
+                      t.plan_status !== "active" ||
+                      (t.plan_status === "active" && planSource !== "admin");
+                    const canDeactivate = t.plan_status === "active";
+                    const isRowBusy = busyId === t.id;
+                    const menuDisabled =
+                      rowBusy ||
+                      isRowBusy ||
+                      pendingPlan !== null ||
+                      pendingStatus !== null;
+                    const syncFailed = Boolean(t.last_sync_failure_at);
 
-                  return (
-                    <tr key={t.id}>
-                      <td>
-                        <Link href={`/admin/tenants/${t.id}`} className={panel.tableLink}>
-                          {t.name}
-                        </Link>
-                        <div className={panel.tableMuted}>{t.slug}</div>
-                      </td>
-                      <td>
-                        <span className={`${panel.badge} ${statusBadge(t.status)}`}>
-                          {t.status}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`${panel.badge} ${planBadge(t.plan_status)}`}>
-                          {planLabel(t.plan_status, t.plan_source)}
-                        </span>
-                      </td>
-                      <td>
-                        {t.slack_connected ? (
-                          <span className={`${panel.badge} ${panel.badgeOk}`}>
-                            {t.slack_team_name || "connected"}
-                          </span>
-                        ) : (
-                          <span className={`${panel.badge} ${panel.badgeNeutral}`}>—</span>
-                        )}
-                      </td>
-                      <td className={panel.tableMuted}>{formatWhen(t.created_at)}</td>
-                      <td>
-                        <span className={panel.tableMuted}>{t.last_synced_at || "—"}</span>
-                        {t.last_sync_failure_at ? (
-                          <div className={panel.tableMuted} style={{ color: "var(--error)" }}>
-                            sync failure
+                    return (
+                      <tr
+                        key={t.id}
+                        className="border-b border-border transition-colors last:border-0 hover:bg-muted/60"
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <TenantAvatar name={t.name} />
+                            <div className="min-w-0">
+                              <Link
+                                href={`/admin/tenants/${t.id}`}
+                                className="font-medium text-foreground hover:text-primary"
+                              >
+                                {t.name}
+                              </Link>
+                              <p className="truncate text-sm text-muted-foreground">{t.slug}</p>
+                            </div>
                           </div>
-                        ) : null}
-                      </td>
-                      <td className={panel.actionsCell}>
-                        <TenantRowMenu
-                          tenantId={t.id}
-                          label={t.name}
-                          open={openMenuId === t.id}
-                          disabled={menuDisabled}
-                          onOpenChange={(open) => setOpenMenuId(open ? t.id : null)}
-                          canDeactivate={canDeactivate}
-                          canWaive={canWaive}
-                          tenantActive={t.status === "active"}
-                          onDeactivatePlan={() => startPlanAction(t, "inactive")}
-                          onWaivePayment={() => startPlanAction(t, "active")}
-                          onToggleSuspend={() =>
-                            startStatusAction(t, t.status === "active" ? "suspended" : "active")
-                          }
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <StatusBadge status={t.status} />
+                        </td>
+                        <td className="px-4 py-4 text-foreground">
+                          {planLabel(t.plan_status, t.plan_source)}
+                        </td>
+                        <td className="px-4 py-4 text-muted-foreground">
+                          {t.slack_connected ? (
+                            <span className="text-foreground">
+                              {t.slack_team_name || "connected"}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-4 py-4 text-muted-foreground">{formatWhen(t.created_at)}</td>
+                        <td className="px-4 py-4">
+                          <span className={syncFailed ? "text-warning" : "text-foreground"}>
+                            {formatRelativeSync(t.last_synced_at)}
+                          </span>
+                          {syncFailed ? (
+                            <p className="mt-0.5 text-xs text-danger">sync failure</p>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-4">
+                          <TenantRowMenu
+                            tenantId={t.id}
+                            label={t.name}
+                            open={openMenuId === t.id}
+                            disabled={menuDisabled}
+                            onOpenChange={(open) => setOpenMenuId(open ? t.id : null)}
+                            canDeactivate={canDeactivate}
+                            canWaive={canWaive}
+                            tenantActive={t.status === "active"}
+                            onDeactivatePlan={() => startPlanAction(t, "inactive")}
+                            onWaivePayment={() => startPlanAction(t, "active")}
+                            onToggleSuspend={() =>
+                              startStatusAction(
+                                t,
+                                t.status === "active" ? "suspended" : "active",
+                              )
+                            }
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-border px-6 py-4 text-sm text-muted-foreground">
+              <p>
+                Showing {visibleCount > 0 ? `1–${visibleCount}` : "0"} of {totalCount} tenant
+                {totalCount === 1 ? "" : "s"}
+                {query ? " (filtered)" : ""}
+              </p>
+            </div>
+          </>
         ) : (
-          <div className={panel.empty}>
-            <p style={{ margin: "0 0 0.75rem" }}>No tenants yet.</p>
-            <Link href="/admin/tenants/new">
-              <button type="button">Create first organisation</button>
-            </Link>
-          </div>
+          <CardContent className="py-12 text-center">
+            <p className="text-body-md text-muted-foreground">
+              {query ? "No tenants match your filter." : "No tenants yet."}
+            </p>
+            {!query ? (
+              <Link
+                href="/admin/tenants/new"
+                className={cn(buttonVariants({ variant: "default" }), "mt-4 rounded-full")}
+              >
+                Create first organisation
+              </Link>
+            ) : null}
+          </CardContent>
         )}
-      </section>
+      </Card>
     </section>
   );
 }

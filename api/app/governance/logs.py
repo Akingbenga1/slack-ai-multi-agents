@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.app.db.models import Job, UsageEvent
@@ -17,19 +17,24 @@ def list_usage_events(
     *,
     event_type: Optional[str] = None,
     limit: int = 50,
-) -> list[UsageEvent]:
+    offset: int = 0,
+) -> tuple[list[UsageEvent], int]:
     """Newest-first usage_events for the tenant (mentions, tokens, jobs, …)."""
     tid = UUID(str(tenant_id))
     lim = max(1, min(int(limit), 200))
+    off = max(0, int(offset))
+    filters = [UsageEvent.tenant_id == tid]
+    if event_type:
+        filters.append(UsageEvent.event_type == event_type.strip())
+    total = db.scalar(select(func.count()).select_from(UsageEvent).where(*filters)) or 0
     q = (
         select(UsageEvent)
-        .where(UsageEvent.tenant_id == tid)
+        .where(*filters)
         .order_by(UsageEvent.created_at.desc())
+        .offset(off)
         .limit(lim)
     )
-    if event_type:
-        q = q.where(UsageEvent.event_type == event_type.strip())
-    return list(db.scalars(q).all())
+    return list(db.scalars(q).all()), int(total)
 
 
 def list_jobs(
@@ -38,19 +43,24 @@ def list_jobs(
     *,
     status: Optional[str] = None,
     limit: int = 50,
-) -> list[Job]:
+    offset: int = 0,
+) -> tuple[list[Job], int]:
     """Newest-first jobs rows (errors when status=failed)."""
     tid = UUID(str(tenant_id))
     lim = max(1, min(int(limit), 200))
+    off = max(0, int(offset))
+    filters = [Job.tenant_id == tid]
+    if status:
+        filters.append(Job.status == status.strip())
+    total = db.scalar(select(func.count()).select_from(Job).where(*filters)) or 0
     q = (
         select(Job)
-        .where(Job.tenant_id == tid)
+        .where(*filters)
         .order_by(Job.created_at.desc())
+        .offset(off)
         .limit(lim)
     )
-    if status:
-        q = q.where(Job.status == status.strip())
-    return list(db.scalars(q).all())
+    return list(db.scalars(q).all()), int(total)
 
 
 def serialize_usage_event(row: UsageEvent) -> dict:

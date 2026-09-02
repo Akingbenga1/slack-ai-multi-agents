@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import styles from "./dashboard.module.css";
 import { IconChevron } from "./icons";
+import { cn } from "@/lib/utils";
 
 type Crumb = {
   label: string;
@@ -14,37 +14,54 @@ type Props = {
   breadcrumbs?: Crumb[];
   actions?: ReactNode;
   children?: ReactNode;
+  className?: string;
 };
 
-export function PageHeader({ title, description, breadcrumbs, actions, children }: Props) {
+export function PageHeader({
+  title,
+  description,
+  breadcrumbs,
+  actions,
+  children,
+  className,
+}: Props) {
   return (
-    <header className={styles.pageHeader}>
+    <header className={cn("mb-10", className)}>
       {breadcrumbs && breadcrumbs.length > 0 ? (
-        <ol className={styles.breadcrumbs} aria-label="Breadcrumb">
+        <ol
+          aria-label="Breadcrumb"
+          className="mb-3 flex flex-wrap items-center gap-1 text-body-md text-muted-foreground"
+        >
           {breadcrumbs.map((crumb, i) => (
-            <li key={`${crumb.label}-${i}`} style={{ display: "contents" }}>
+            <li key={`${crumb.label}-${i}`} className="flex items-center gap-1">
               {i > 0 ? (
-                <span className={styles.breadcrumbSep} aria-hidden="true">
+                <span aria-hidden="true" className="text-border">
                   <IconChevron size={14} />
                 </span>
               ) : null}
               {crumb.href ? (
-                <Link href={crumb.href} className={styles.breadcrumbLink}>
+                <Link href={crumb.href} className="hover:text-primary">
                   {crumb.label}
                 </Link>
               ) : (
-                <span aria-current="page">{crumb.label}</span>
+                <span aria-current="page" className="text-foreground">
+                  {crumb.label}
+                </span>
               )}
             </li>
           ))}
         </ol>
       ) : null}
-      <div className={styles.pageHeaderMain}>
-        <div className={styles.pageHeaderCopy}>
-          <h1 className={styles.pageTitle}>{title}</h1>
-          {description ? <p className={styles.pageDescription}>{description}</p> : null}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground lg:text-headline-lg">
+            {title}
+          </h1>
+          {description ? (
+            <p className="mt-2 max-w-3xl text-body-md text-muted-foreground">{description}</p>
+          ) : null}
         </div>
-        {actions ? <div className={styles.pageHeaderActions}>{actions}</div> : null}
+        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
       </div>
       {children}
     </header>
@@ -52,5 +69,5 @@ export function PageHeader({ title, description, breadcrumbs, actions, children 
 }
 
 export function DashboardPanel({ children }: { children: ReactNode }) {
-  return <div className={styles.panel}>{children}</div>;
+  return <div>{children}</div>;
 }

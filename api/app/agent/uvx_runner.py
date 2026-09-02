@@ -22,6 +22,7 @@ _UNSAFE_ARG = re.compile(r"[;&|`$<>\\\n\r]")
 _OUTPUT_FLAGS = frozenset(
     {"-o", "--output", "--out", "-out", "--output-file", "--outfile", "-f", "--file"}
 )
+_OUTPUT_DIR_FLAGS = frozenset({"--output-dir", "-d", "--outdir"})
 
 
 class UvxRunnerError(Exception):
@@ -43,6 +44,8 @@ class UvxResult:
     cmd: list[str]
     error: str | None = None
     output_file: str | None = None
+    output_files: tuple[str, ...] = ()
+    with_packages: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -56,10 +59,49 @@ class UvxResult:
         }
         if self.error:
             payload["error"] = self.error
+        if self.with_packages:
+            payload["with_packages"] = list(self.with_packages)
         if self.output_file:
             payload["output_file"] = self.output_file
             payload.setdefault("path", self.output_file)
+        if self.output_files:
+            payload["output_files"] = list(self.output_files)
+            if not self.output_file:
+                payload["output_file"] = self.output_files[0]
+                payload.setdefault("path", self.output_files[0])
         return payload
+
+
+def infer_output_dir_from_args(
+    args_list: Sequence[str],
+    *,
+    cwd: str | Path | None = None,
+) -> Path | None:
+    """Return a declared output directory from common CLI flags, if any."""
+    args = [str(x) for x in args_list]
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        for flag in _OUTPUT_DIR_FLAGS:
+            if token == flag:
+                if idx + 1 < len(args):
+                    raw = args[idx + 1].strip()
+                    if raw:
+                        path = Path(raw)
+                        if not path.is_absolute() and cwd:
+                            path = Path(cwd) / path
+                        return path.resolve()
+                return None
+            prefix = f"{flag}="
+            if token.startswith(prefix):
+                raw = token[len(prefix) :].strip()
+                if raw:
+                    path = Path(raw)
+                    if not path.is_absolute() and cwd:
+                        path = Path(cwd) / path
+                    return path.resolve()
+        idx += 1
+    return None
 
 
 def infer_output_path_from_args(args_list: Sequence[str]) -> str | None:
@@ -113,17 +155,20 @@ def _resolve_output_candidate(raw: str | None, *, cwd: str | Path | None) -> str
     return str(resolved) if resolved.is_file() else None
 
 
-def _detect_new_output_file(
+def _detect_new_output_files(
     *,
     cwd: str | Path | None,
     before: dict[str, float],
     args_list: Sequence[str],
-) -> str | None:
-    if cwd is None:
-        return None
-    root = Path(cwd)
+    scan_root: Path | None = None,
+) -> list[str]:
+    root = scan_root
+    if root is None:
+        if cwd is None:
+            return []
+        root = Path(cwd)
     if not root.is_dir():
-        return None
+        return []
     inputs = _input_basenames(args_list)
     after = _snapshot_dir_files(root)
     changed: list[str] = []
@@ -132,9 +177,35 @@ def _detect_new_output_file(
             continue
         if name not in before or mtime > before.get(name, 0.0) + 1e-6:
             changed.append(name)
-    if len(changed) != 1:
-        return None
-    return str((root / changed[0]).resolve())
+    return [str((root / name).resolve()) for name in sorted(changed)]
+
+
+def resolve_output_files(
+    *,
+    args_list: Sequence[str],
+    cwd: str | Path | None,
+    ok: bool,
+    help_only: bool,
+    before_snapshot: dict[str, float] | None = None,
+    output_dir_snapshot: dict[str, float] | None = None,
+    scan_root: Path | None = None,
+) -> list[str]:
+    """Best-effort output paths after a successful CLI run."""
+    if not ok or help_only:
+        return []
+    declared = infer_output_path_from_args(args_list)
+    resolved = _resolve_output_candidate(declared, cwd=cwd)
+    if resolved:
+        return [resolved]
+    snapshot = output_dir_snapshot if scan_root is not None else before_snapshot
+    if snapshot is not None:
+        return _detect_new_output_files(
+            cwd=cwd,
+            before=snapshot,
+            args_list=args_list,
+            scan_root=scan_root,
+        )
+    return []
 
 
 def resolve_output_file(
@@ -144,20 +215,23 @@ def resolve_output_file(
     ok: bool,
     help_only: bool,
     before_snapshot: dict[str, float] | None = None,
+    output_dir_snapshot: dict[str, float] | None = None,
+    scan_root: Path | None = None,
 ) -> str | None:
-    """Best-effort output path after a successful CLI run."""
-    if not ok or help_only:
-        return None
-    declared = infer_output_path_from_args(args_list)
-    resolved = _resolve_output_candidate(declared, cwd=cwd)
-    if resolved:
-        return resolved
-    if before_snapshot is not None:
-        return _detect_new_output_file(
-            cwd=cwd,
-            before=before_snapshot,
-            args_list=args_list,
-        )
+    """Best-effort single output path after a successful CLI run."""
+    files = resolve_output_files(
+        args_list=args_list,
+        cwd=cwd,
+        ok=ok,
+        help_only=help_only,
+        before_snapshot=before_snapshot,
+        output_dir_snapshot=output_dir_snapshot,
+        scan_root=scan_root,
+    )
+    if len(files) == 1:
+        return files[0]
+    if len(files) > 1:
+        return files[0]
     return None
 
 
@@ -179,6 +253,33 @@ def _validate_package(package: str) -> str:
             code="invalid_package",
         )
     return name
+
+
+def _validate_with_packages(with_packages: Sequence[str] | None) -> list[str]:
+    out: list[str] = []
+    for raw in with_packages or []:
+        name = str(raw).strip()
+        if not name:
+            continue
+        out.append(_validate_package(name))
+    return out
+
+
+def _build_uvx_cmd(
+    prefix: list[str],
+    *,
+    package: str,
+    args: list[str],
+    from_spec: str | None,
+    with_packages: Sequence[str],
+) -> list[str]:
+    cmd = list(prefix)
+    if from_spec:
+        cmd.extend(["--from", from_spec])
+    for dep in with_packages:
+        cmd.extend(["--with", dep])
+    cmd.extend([package, *args])
+    return cmd
 
 
 def _validate_args(args_list: Sequence[str]) -> list[str]:
@@ -205,11 +306,13 @@ def run_uvx(
     max_output_bytes: int | None = None,
     help_only: bool = False,
     from_spec: str | None = None,
+    with_packages: Sequence[str] | None = None,
 ) -> UvxResult:
     """Install-and-run ``package`` via real ``uvx`` / ``uv tool run``.
 
     When ``from_spec`` is set (e.g. ``markitdown[pdf]``), runs:
     ``uvx --from <from_spec> <package> …``.
+    When ``with_packages`` is set, each entry is passed as ``--with <dep>``.
     When ``package`` itself contains extras like ``markitdown[pdf]``, it is
     treated as ``from_spec`` and the console script defaults to the base name.
     """
@@ -239,6 +342,7 @@ def run_uvx(
     args = _validate_args(list(args_list or []))
     if help_only and "--help" not in args:
         args = [*args, "--help"]
+    deps = _validate_with_packages(with_packages)
 
     prefix = resolve_uvx_prefix()
     if prefix is None:
@@ -247,10 +351,13 @@ def run_uvx(
             code="uvx_missing",
         )
 
-    if raw_from:
-        cmd = [*prefix, "--from", raw_from, pkg, *args]
-    else:
-        cmd = [*prefix, pkg, *args]
+    cmd = _build_uvx_cmd(
+        prefix,
+        package=pkg,
+        args=args,
+        from_spec=raw_from,
+        with_packages=deps,
+    )
     timeout = float(
         timeout_seconds
         if timeout_seconds is not None
@@ -262,9 +369,16 @@ def run_uvx(
         else settings.cli_tools_max_output_bytes
     )
     workdir = str(cwd) if cwd is not None else None
+    output_dir = (
+        infer_output_dir_from_args(args, cwd=workdir) if workdir and not help_only else None
+    )
     before_files = (
         _snapshot_dir_files(Path(workdir)) if workdir and not help_only else {}
     )
+    before_output_dir: dict[str, float] = {}
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        before_output_dir = _snapshot_dir_files(output_dir)
 
     logger.info("uvx_exec cmd=%s cwd=%s", cmd, workdir)
     try:
@@ -296,12 +410,25 @@ def run_uvx(
     stderr = (completed.stderr or "")[:2000]
     ok = completed.returncode == 0
     error = None if ok else (stderr.strip() or f"exit code {completed.returncode}")
-    output_file = resolve_output_file(
+    output_files = resolve_output_files(
         args_list=args,
         cwd=workdir,
         ok=ok,
         help_only=help_only,
         before_snapshot=before_files or None,
+        output_dir_snapshot=before_output_dir or None,
+        scan_root=output_dir,
+    )
+    if not output_files and before_files:
+        output_files = resolve_output_files(
+            args_list=args,
+            cwd=workdir,
+            ok=ok,
+            help_only=help_only,
+            before_snapshot=before_files or None,
+        )
+    output_file = output_files[0] if len(output_files) == 1 else (
+        output_files[0] if output_files else None
     )
     return UvxResult(
         ok=ok,
@@ -313,11 +440,32 @@ def run_uvx(
         cmd=cmd,
         error=error,
         output_file=output_file,
+        output_files=tuple(output_files),
+        with_packages=tuple(deps),
     )
 
 
-def run_uvx_from_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
+def run_uvx_from_arguments(
+    arguments: dict[str, Any] | None,
+    *,
+    prior_attempts: Sequence[dict[str, Any]] | None = None,
+    attachments: Sequence[dict[str, Any]] | None = None,
+    instruction: str = "",
+    success_criteria: str = "",
+    use_recovery: bool = True,
+) -> dict[str, Any]:
     """Tool-facing wrapper: map LLM/tool args onto ``run_uvx``."""
+    if use_recovery:
+        from api.app.agent.uvx_invoke import run_uvx_with_recovery
+
+        return run_uvx_with_recovery(
+            dict(arguments or {}),
+            prior_attempts=prior_attempts,
+            attachments=attachments,
+            instruction=instruction,
+            success_criteria=success_criteria,
+        )
+
     args = dict(arguments or {})
     package = str(args.get("package") or "").strip()
     raw_list = args.get("args_list") or args.get("args") or []
@@ -327,6 +475,10 @@ def run_uvx_from_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
     cwd = args.get("cwd") or args.get("working_dir")
     help_only = bool(args.get("help_only") or args.get("help"))
     from_spec = args.get("from_spec") or args.get("from")
+    raw_with = args.get("with_packages") or args.get("with") or []
+    if isinstance(raw_with, str):
+        raw_with = [raw_with]
+    with_packages = [str(x).strip() for x in list(raw_with) if str(x).strip()]
     try:
         result = run_uvx(
             package,
@@ -334,6 +486,7 @@ def run_uvx_from_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
             cwd=cwd,
             help_only=help_only,
             from_spec=str(from_spec).strip() if from_spec else None,
+            with_packages=with_packages,
         )
     except UvxRunnerError as exc:
         return {

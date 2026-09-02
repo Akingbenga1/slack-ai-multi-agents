@@ -1,33 +1,19 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
-import { InvitePanel } from "@/components/InvitePanel";
-import { sessionTenantId } from "@/lib/tenant";
+import { OrgInviteRedirect } from "@/components/auth/OrgInviteRedirect";
 
-export default async function OrgInvitePage() {
-  const session = await getServerSession(authOptions);
-  const tenantId = sessionTenantId(session?.user?.tenantId);
-  const isOrgAdmin = session?.user?.role === "org_admin";
-
+export default function OrgInviteRedirectPage() {
   return (
     <>
       <PageHeader
-        title="Invite team"
-        description="Invite another org admin to this organisation with a copyable magic link."
+        className="mb-8"
+        title="Team invites"
+        description="Redirecting to team management where you can invite org admins."
         breadcrumbs={[
           { label: "Overview", href: "/app" },
-          { label: "Invite team" },
+          { label: "Team" },
         ]}
       />
-      <section className={panel.section}>
-        <InvitePanel
-          accessToken={session?.accessToken ?? null}
-          tenantId={tenantId}
-          inviteToken={null}
-          isOrgAdmin={!!isOrgAdmin}
-        />
-      </section>
+      <OrgInviteRedirect />
     </>
   );
 }

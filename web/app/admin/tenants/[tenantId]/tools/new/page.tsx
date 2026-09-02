@@ -25,6 +25,7 @@ export default async function AdminTenantCreateToolPage({ params }: Props) {
           { label: "Tools", href: `/admin/tenants/${tenantId}/tools` },
           { label: "New" },
         ]}
+        className="mb-8"
       />
       <CreateToolForm
         cancelHref={`/admin/tenants/${tenantId}/tools`}

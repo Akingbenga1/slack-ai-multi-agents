@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Link2 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 type Props = {
   accessToken: string | null;
@@ -51,6 +61,16 @@ async function fetchConnection(
   return data;
 }
 
+function formatWhen(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 export function SlackConnectPanel({
   accessToken,
   tenantId,
@@ -90,91 +110,122 @@ export function SlackConnectPanel({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+    <div className="space-y-6">
       {connectedFlag ? (
         <p
-          style={{
-            margin: 0,
-            padding: "0.75rem 1rem",
-            background: "#e8f5e9",
-            borderRadius: 4,
-          }}
+          className="rounded-lg border border-success/20 bg-success-muted px-4 py-3 text-body-md text-success"
+          role="status"
         >
           Slack workspace connected. You can reinstall if scopes change.
         </p>
       ) : null}
+
       {error ? (
-        <p style={{ color: "var(--error)", margin: 0 }} role="alert">
+        <p
+          className="rounded-lg border border-danger-muted bg-danger-muted/40 px-4 py-3 text-body-md text-danger"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
 
-      <div
-        style={{
-          padding: "0.75rem 1rem",
-          background: "#f5f5f5",
-          borderRadius: 4,
-          fontSize: "0.95rem",
-        }}
-      >
-        {data === undefined ? (
-          <p style={{ margin: 0 }}>Loading Slack connection…</p>
-        ) : data === null ? (
-          <p style={{ margin: 0 }}>
-            Could not load connection status. Ensure the API is up and you are
-            signed in.
-          </p>
-        ) : data.connected ? (
-          <>
-            <p style={{ margin: "0 0 0.35rem" }}>
-              Status: <strong style={{ color: "#1b5e20" }}>connected</strong>
-              {data.team_name ? ` · ${data.team_name}` : ""}
-              {data.team_id ? ` (${data.team_id})` : ""}
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                <Link2 className="h-5 w-5" />
+              </span>
+              <div>
+                <CardTitle className="text-headline-md">Workspace connection</CardTitle>
+                <CardDescription className="mt-1">
+                  Install the Slack app for this organisation to enable mentions and history sync.
+                </CardDescription>
+              </div>
+            </div>
+            {data && data !== null ? (
+              <Badge variant={data.connected ? "success" : "warning"}>
+                {data.connected ? "Connected" : "Not connected"}
+              </Badge>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5 pt-6">
+          {data === undefined ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }, (_, key) => (
+                <div key={key} className="h-10 animate-pulse rounded-lg bg-muted" />
+              ))}
+            </div>
+          ) : data === null ? (
+            <p className="text-body-md text-muted-foreground">
+              Could not load connection status. Ensure the API is up and you are signed in.
             </p>
-            {data.installed_at ? (
-              <p style={{ margin: "0 0 0.35rem", color: "var(--muted)", fontSize: "0.85rem" }}>
-                Installed {data.installed_at}
-              </p>
-            ) : null}
-            {data.scopes ? (
-              <p style={{ margin: 0, color: "#444", fontSize: "0.85rem" }}>
-                Scopes: {data.scopes}
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <p style={{ margin: 0 }}>
-            Status: <strong style={{ color: "#9a3412" }}>not connected</strong>
-            {" — "}
-            install the Slack app for this organisation to enable mentions and sync.
-          </p>
-        )}
-      </div>
+          ) : data.connected ? (
+            <dl className="space-y-3 text-sm">
+              <div className="flex flex-col gap-1 border-b border-border pb-3 sm:flex-row sm:justify-between">
+                <dt className="text-muted-foreground">Workspace</dt>
+                <dd className="font-medium text-foreground">
+                  {data.team_name ?? "—"}
+                  {data.team_id ? (
+                    <span className="mt-1 block font-mono text-xs text-muted-foreground">
+                      {data.team_id}
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
+              {data.installed_at ? (
+                <div className="flex flex-col gap-1 border-b border-border pb-3 sm:flex-row sm:justify-between">
+                  <dt className="text-muted-foreground">Installed</dt>
+                  <dd className="text-foreground">{formatWhen(data.installed_at)}</dd>
+                </div>
+              ) : null}
+              {data.scopes ? (
+                <div className="flex flex-col gap-1 sm:flex-row sm:justify-between">
+                  <dt className="text-muted-foreground">Scopes</dt>
+                  <dd className="max-w-xl text-foreground">{data.scopes}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : (
+            <p className="text-body-md text-muted-foreground">
+              No Slack workspace is linked yet. Connect to let the agent receive mentions and run
+              sync jobs.
+            </p>
+          )}
 
-      <div>
-        <button
-          type="button"
-          onClick={startInstall}
-          disabled={!data?.install_url}
-          style={{ padding: "0.5rem 1rem", cursor: "pointer" }}
-        >
-          {data?.connected ? "Reinstall Slack app" : "Connect Slack"}
-        </button>
-      </div>
+          <div className="flex flex-wrap gap-2 border-t border-border pt-5">
+            <Button
+              type="button"
+              className="rounded-full"
+              onClick={startInstall}
+              disabled={!data?.install_url}
+            >
+              {data?.connected ? "Reinstall Slack app" : "Connect Slack"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-      {data && !data.slack_configured ? (
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
-          API is missing <code>SLACK_CLIENT_ID</code> — see{" "}
-          <code>docs/slack-app-setup.md</code>.
-        </p>
-      ) : (
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
-          OAuth redirect must match{" "}
-          <code>{"{PUBLIC_BASE_URL}/slack/oauth/callback"}</code>. After install,
-          invite the bot to channels. Details:{" "}
-          <code>docs/slack-app-setup.md</code>.
-        </p>
-      )}
+      <Card>
+        <CardContent className="py-5 text-sm text-muted-foreground">
+          {data && !data.slack_configured ? (
+            <p>
+              API is missing <code className="rounded bg-muted px-1">SLACK_CLIENT_ID</code> — see{" "}
+              <code className="rounded bg-muted px-1">docs/slack-app-setup.md</code>.
+            </p>
+          ) : (
+            <p>
+              OAuth redirect must match{" "}
+              <code className="rounded bg-muted px-1">
+                {"{PUBLIC_BASE_URL}/slack/oauth/callback"}
+              </code>
+              . After install, invite the bot to channels. Details:{" "}
+              <code className="rounded bg-muted px-1">docs/slack-app-setup.md</code>.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

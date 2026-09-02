@@ -52,6 +52,18 @@ def _english_convert_step() -> dict[str, Any]:
     }
 
 
+def _uvx_smoke_step() -> dict[str, Any]:
+    return {
+        "tool_name": "execute_goal",
+        "arguments": {
+            "instruction": "Run a real uvx CLI smoke check",
+            "success_criteria": "Real uvx run produces stdout evidence",
+        },
+        "requires_attachment": True,
+        "on_precondition_fail": "Please upload a spreadsheet first.",
+    }
+
+
 def _cli_registry_empty(db: Session, tenant: Tenant) -> None:
     assert (
         db.query(ToolRegistry)
@@ -202,7 +214,7 @@ class TestBehaviour2ExecutorUsesRealUvxNotRegistry:
             return result.as_dict()
 
         model = _PlanThenReactModel(
-            [_english_convert_step()],
+            [_uvx_smoke_step()],
             react_calls=[
                 ToolCall(
                     name="run_uvx",
@@ -250,7 +262,7 @@ class TestBehaviour3ReactRetryOnRealUvxFailure:
             return payload
 
         model = _PlanThenReactModel(
-            [_english_convert_step()],
+            [_uvx_smoke_step()],
             react_calls=[
                 ToolCall(
                     name="run_uvx",
@@ -311,7 +323,7 @@ class TestBehaviour4BadPackageFailsViaRealUvxNotRegistry:
             ).as_dict()
 
         model = _PlanThenReactModel(
-            [_english_convert_step()],
+            [_uvx_smoke_step()],
             react_calls=[
                 ToolCall(
                     name="run_uvx",
@@ -358,7 +370,7 @@ class TestBehaviour5SuccessfulEnglishStepYieldsRealCliOutput:
             ).as_dict()
 
         model = _PlanThenReactModel(
-            [_english_convert_step()],
+            [_uvx_smoke_step()],
             react_calls=[
                 ToolCall(
                     name="run_uvx",

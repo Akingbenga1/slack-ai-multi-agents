@@ -776,3 +776,110 @@ def test_advice_without_stop_after_continues_to_tools(db: Session, tenant_a: Ten
     assert result.status == "succeeded"
     assert "Starting processing" in result.message
     assert calls == ["fetch"]
+
+
+def test_execute_goal_verifies_artifact_when_result_reports_failure(
+    db: Session, tenant_a: Tenant, tmp_path: Path
+):
+    target = tmp_path / "Combined.pdf"
+    target.write_bytes(b"%PDF-merged")
+    plan = insert_agent_plan(
+        db,
+        tenant_id=str(tenant_a.id),
+        question="Merge PDFs",
+        status="ready",
+        plan_json={"steps": []},
+    )
+    insert_agent_plan_step(
+        db,
+        tenant_id=str(tenant_a.id),
+        plan_id=plan.id,
+        step_index=0,
+        tool_name="execute_goal",
+        arguments={
+            "instruction": "Merge uploaded PDFs",
+            "cwd": str(tmp_path),
+        },
+        success_criteria="Combined PDF exists",
+        status="pending",
+    )
+    db.commit()
+
+    def fake_react(*, context, extra, db, instruction, success_criteria, step_arguments):
+        return {
+            "ok": False,
+            "error": "executor stopped without success",
+            "output_file": str(target),
+            "attempts": [],
+            "instruction": instruction,
+        }
+
+    import api.app.agent.executor as executor_module
+
+    original = executor_module._run_english_goal_react
+    executor_module._run_english_goal_react = fake_react
+    try:
+        result = _run(
+            db,
+            tenant_a,
+            plan,
+            {},
+            ScriptedChatModel([_done_result()]),
+        )
+    finally:
+        executor_module._run_english_goal_react = original
+
+    assert result.status == "succeeded"
+    steps = list_agent_plan_steps(db, tenant_id=str(tenant_a.id), plan_id=plan.id)
+    assert steps[0].status == "succeeded"
+    assert steps[0].result.get("verified") is True
+
+
+def test_probe_only_execute_goal_fails_verification(db: Session, tenant_a: Tenant):
+    plan = insert_agent_plan(
+        db,
+        tenant_id=str(tenant_a.id),
+        question="Convert file",
+        status="ready",
+        plan_json={"steps": []},
+    )
+    insert_agent_plan_step(
+        db,
+        tenant_id=str(tenant_a.id),
+        plan_id=plan.id,
+        step_index=0,
+        tool_name="execute_goal",
+        arguments={"instruction": "Convert spreadsheet to CSV"},
+        success_criteria="CSV file exists",
+        status="pending",
+    )
+    db.commit()
+
+    def fake_react(*, context, extra, db, instruction, success_criteria, step_arguments):
+        return {
+            "ok": True,
+            "stdout": "Usage: in2csv ...",
+            "attempts": [
+                {"ok": True, "help_only": True, "args_list": ["--help"], "stdout": "Usage"},
+            ],
+            "instruction": instruction,
+        }
+
+    import api.app.agent.executor as executor_module
+
+    original = executor_module._run_english_goal_react
+    executor_module._run_english_goal_react = fake_react
+    try:
+        result = _run(
+            db,
+            tenant_a,
+            plan,
+            {},
+            ScriptedChatModel([_done_result()]),
+        )
+    finally:
+        executor_module._run_english_goal_react = original
+
+    assert result.status == "failed"
+    steps = list_agent_plan_steps(db, tenant_id=str(tenant_a.id), plan_id=plan.id)
+    assert steps[0].status == "failed"

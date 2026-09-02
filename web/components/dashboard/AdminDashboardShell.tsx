@@ -5,7 +5,6 @@ import { DashboardShell, type SidebarItem } from "./DashboardShell";
 import {
   IconAgent,
   IconBilling,
-  IconCliHost,
   IconDashboard,
   IconExternal,
   IconHealth,
@@ -49,15 +48,7 @@ const ADMIN_ITEMS: SidebarItem[] = [
     icon: <IconTools size={20} />,
     isActive: (pathname) =>
       pathname.startsWith("/admin/tools") ||
-      (pathname.includes("/tools") &&
-        !pathname.startsWith("/admin/cli-host") &&
-        !pathname.startsWith("/admin/mcp-host")),
-  },
-  {
-    href: "/admin/cli-host",
-    label: "CLI host",
-    icon: <IconCliHost size={20} />,
-    isActive: (pathname) => pathname.startsWith("/admin/cli-host"),
+      (pathname.includes("/tools") && !pathname.startsWith("/admin/mcp-host")),
   },
   {
     href: "/admin/mcp-host",
@@ -96,6 +87,7 @@ export function AdminDashboardShell({ userEmail, userRole, children }: Props) {
       navLabel="Platform admin navigation"
       items={ADMIN_ITEMS}
       footerItems={FOOTER_ITEMS}
+      primaryAction={{ href: "/admin/tenants/new", label: "New tenant" }}
       userEmail={userEmail}
       userRole={userRole}
     >

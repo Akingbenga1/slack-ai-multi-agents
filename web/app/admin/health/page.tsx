@@ -15,6 +15,7 @@ export default async function AdminHealthPage() {
           { label: "Overview", href: "/admin" },
           { label: "Platform health" },
         ]}
+        className="mb-8"
       />
       <PlatformHealthPanel accessToken={session?.accessToken ?? null} />
     </>

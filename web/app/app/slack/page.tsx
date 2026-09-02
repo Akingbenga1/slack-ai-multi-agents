@@ -1,15 +1,13 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
 import { SlackConnectPanel } from "@/components/SlackConnectPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
 type Props = {
   searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<
     string,
-    string | string[] | undefined
-  >;
+    string | string[] | undefined>;
 };
 
 function param(value: string | string[] | undefined): string | undefined {
@@ -33,15 +31,14 @@ export default async function SlackConnectPage({ searchParams }: Props) {
           { label: "Overview", href: "/app" },
           { label: "Slack" },
         ]}
+        className="mb-8"
       />
-      <div className={panel.section}>
-        <SlackConnectPanel
-          accessToken={session?.accessToken ?? null}
-          tenantId={tenantId}
-          connectedFlag={connected}
-          errorFlag={error}
-        />
-      </div>
+      <SlackConnectPanel
+        accessToken={session?.accessToken ?? null}
+        tenantId={tenantId}
+        connectedFlag={connected}
+        errorFlag={error}
+      />
     </>
   );
 }

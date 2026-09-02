@@ -1,7 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import panel from "@/components/dashboard/panel.module.css";
 import { UsageSummaryPanel } from "@/components/UsageSummaryPanel";
 import { sessionTenantId } from "@/lib/tenant";
 
@@ -18,13 +17,12 @@ export default async function UsagePage() {
           { label: "Overview", href: "/app" },
           { label: "Usage" },
         ]}
+        className="mb-8"
       />
-      <div className={panel.section}>
-        <UsageSummaryPanel
-          accessToken={session?.accessToken ?? null}
-          tenantId={tenantId}
-        />
-      </div>
+      <UsageSummaryPanel
+        accessToken={session?.accessToken ?? null}
+        tenantId={tenantId}
+      />
     </>
   );
 }

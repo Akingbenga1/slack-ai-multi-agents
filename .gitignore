@@ -48,3 +48,8 @@ Thumbs.db
 tldr_search.py
 web/node_modules
 Feature-implementations.node_modules
+file-stations/
+complaints-of-feature.md
+UI-gap.md
+prototype-design/
+future-implementation.md

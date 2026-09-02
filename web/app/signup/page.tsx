@@ -4,6 +4,12 @@ import { FormEvent, useState } from "react";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  AuthFormField,
+  PublicAuthShell,
+  authInputClassName,
+} from "@/components/auth/PublicAuthShell";
+import { Button } from "@/components/ui/button";
 
 function apiBaseUrl(): string | null {
   const raw = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
@@ -81,75 +87,60 @@ export default function SignupPage() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        fontFamily: "system-ui, sans-serif",
-        padding: "1.5rem",
-      }}
+    <PublicAuthShell
+      title="Create organisation"
+      description="Register your organisation and the admin account that will manage it."
+      maxWidth="lg"
+      footer={
+        <>
+          Already have an account?{" "}
+          <Link href="/login" className="font-medium text-primary hover:underline">
+            Sign in
+          </Link>
+        </>
+      }
     >
-      <form
-        onSubmit={(ev) => void onSubmit(ev)}
-        style={{
-          width: "100%",
-          maxWidth: 360,
-          display: "grid",
-          gap: "0.75rem",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "1.5rem" }}>Create organisation</h1>
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
-          Register your org and admin account — no platform-owner ticket. You
-          will land in the org portal. Paying, Slack, and agent setup stay
-          self-serve after signup.
-        </p>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Organisation name</span>
+      <form onSubmit={(ev) => void onSubmit(ev)} className="space-y-4">
+        <AuthFormField label="Organisation name">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
             maxLength={255}
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Slug (optional)</span>
+        </AuthFormField>
+        <AuthFormField label="Organisation URL" hint="Optional short name for links — generated from the organisation name if left blank">
           <input
             type="text"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
-            placeholder="derived from name if blank"
+            placeholder="acme-corp"
             maxLength={64}
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Your email</span>
+        </AuthFormField>
+        <AuthFormField label="Your email">
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Display name (optional)</span>
+        </AuthFormField>
+        <AuthFormField label="Display name" hint="Optional">
           <input
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             maxLength={255}
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
-        <label style={{ display: "grid", gap: 4 }}>
-          <span>Password</span>
+        </AuthFormField>
+        <AuthFormField label="Password" hint="Minimum 8 characters">
           <input
             type="password"
             value={password}
@@ -157,21 +148,18 @@ export default function SignupPage() {
             required
             minLength={8}
             autoComplete="new-password"
-            style={{ padding: "0.5rem" }}
+            className={authInputClassName}
           />
-        </label>
+        </AuthFormField>
         {error ? (
-          <p style={{ color: "var(--error)", margin: 0 }} role="alert">
+          <p className="text-sm text-danger" role="alert">
             {error}
           </p>
         ) : null}
-        <button type="submit" disabled={pending} style={{ padding: "0.6rem" }}>
+        <Button type="submit" disabled={pending} className="w-full rounded-full">
           {pending ? "Creating…" : "Create organisation"}
-        </button>
-        <p style={{ margin: 0, fontSize: "0.9rem" }}>
-          Already have an account? <Link href="/login">Sign in</Link>
-        </p>
+        </Button>
       </form>
-    </main>
+    </PublicAuthShell>
   );
 }

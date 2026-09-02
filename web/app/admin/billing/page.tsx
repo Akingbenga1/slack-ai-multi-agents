@@ -11,6 +11,7 @@ export default function AdminBillingPage() {
           { label: "Overview", href: "/admin" },
           { label: "Billing" },
         ]}
+        className="mb-8"
       />
       <PlatformBillingOverviewPanel />
     </>

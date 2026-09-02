@@ -75,10 +75,10 @@ const ORG_ITEMS: SidebarItem[] = [
 
 const FOOTER_ITEMS: SidebarItem[] = [
   {
-    href: "/app/invite",
-    label: "Invite team",
+    href: "/app/team",
+    label: "Team",
     icon: <IconInvite size={20} />,
-    isActive: (p) => p.startsWith("/app/invite"),
+    isActive: (p) => p.startsWith("/app/team") || p.startsWith("/app/invite"),
   },
   { href: "/", label: "Site home", icon: <IconExternal size={20} /> },
 ];

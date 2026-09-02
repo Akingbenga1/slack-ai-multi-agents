@@ -1,75 +1,113 @@
-import panel from "@/components/dashboard/panel.module.css";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   formatDateTime,
   formatMoney,
   type MockTransaction,
 } from "@/lib/mock/billing-data";
+import {
+  transactionStatusVariant,
+  transactionTypeLabel,
+  transactionTypeVariant,
+} from "@/components/billing/billing-display";
 
 type Props = {
   transactions: MockTransaction[];
   tenantName?: string;
 };
 
-function statusClass(status: MockTransaction["status"]): string {
-  if (status === "succeeded") return panel.badgeOk;
-  if (status === "pending") return panel.badgeWarn;
-  return panel.badgeError;
-}
-
-function typeLabel(type: MockTransaction["type"]): string {
-  if (type === "charge") return "Charge";
-  if (type === "refund") return "Refund";
-  if (type === "adjustment") return "Adjustment";
-  return "Payout";
-}
-
 export function TransactionsPanel({ transactions, tenantName }: Props) {
+  const description = tenantName
+    ? `Payments, refunds, and adjustments for ${tenantName}.`
+    : "Payments, refunds, and adjustments for this organisation.";
+
   return (
-    <section className={panel.section}>
-      <div className={panel.sectionHeader}>
-        <h2 className={panel.sectionTitle}>Transaction history</h2>
-        <span className={panel.sectionCount}>{transactions.length}</span>
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-headline-md text-foreground">Transaction history</h2>
+            <Badge variant="muted">{transactions.length}</Badge>
+          </div>
+          <p className="mt-1 text-body-md text-muted-foreground">{description}</p>
+        </div>
       </div>
-      <p className={panel.sectionDesc}>
-        {tenantName
-          ? `Payments, refunds, and adjustments for ${tenantName}.`
-          : "Payments, refunds, and adjustments for this organisation."}
-      </p>
 
       {transactions.length > 0 ? (
-        <div className={panel.tableWrap}>
-          <table className={panel.table}>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
             <thead>
-              <tr>
-                <th scope="col">Date</th>
-                <th scope="col">Type</th>
-                <th scope="col">Description</th>
-                <th scope="col">Method</th>
-                <th scope="col">Amount</th>
-                <th scope="col">Status</th>
+              <tr className="border-b border-border bg-[#f8fafc]">
+                <th
+                  scope="col"
+                  className="px-6 py-3 text-label-md text-muted-foreground"
+                >
+                  Date
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-3 text-label-md text-muted-foreground"
+                >
+                  Type
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-3 text-label-md text-muted-foreground"
+                >
+                  Description
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-3 text-label-md text-muted-foreground"
+                >
+                  Method
+                </th>
+                <th
+                  scope="col"
+                  className="px-4 py-3 text-label-md text-muted-foreground"
+                >
+                  Amount
+                </th>
+                <th
+                  scope="col"
+                  className="px-6 py-3 text-label-md text-muted-foreground"
+                >
+                  Status
+                </th>
               </tr>
             </thead>
             <tbody>
               {transactions.map((txn) => (
-                <tr key={txn.id}>
-                  <td className={panel.tableMuted}>{formatDateTime(txn.occurredAt)}</td>
-                  <td>{typeLabel(txn.type)}</td>
-                  <td>
-                    {txn.description}
-                    <div className={panel.tableMuted}>
-                      <code>{txn.id}</code>
-                    </div>
+                <tr
+                  key={txn.id}
+                  className="border-b border-border last:border-b-0 hover:bg-muted/40"
+                >
+                  <td className="px-6 py-4 whitespace-nowrap text-foreground">
+                    {formatDateTime(txn.occurredAt)}
                   </td>
-                  <td className={panel.tableMuted}>{txn.paymentMethod}</td>
-                  <td>
+                  <td className="px-4 py-4">
+                    <Badge variant={transactionTypeVariant(txn.type)}>
+                      {transactionTypeLabel(txn.type)}
+                    </Badge>
+                  </td>
+                  <td className="max-w-xs px-4 py-4">
+                    <p className="text-foreground">{txn.description}</p>
+                    <p className="mt-1 font-mono text-[13px] text-muted-foreground">
+                      {txn.id}
+                    </p>
+                  </td>
+                  <td className="px-4 py-4 text-foreground">
+                    {txn.paymentMethod}
+                  </td>
+                  <td className="px-4 py-4 font-medium text-foreground">
                     {txn.amountCents === 0
                       ? "—"
                       : formatMoney(txn.amountCents, txn.currency)}
                   </td>
-                  <td>
-                    <span className={`${panel.badge} ${statusClass(txn.status)}`}>
+                  <td className="px-6 py-4">
+                    <Badge variant={transactionStatusVariant(txn.status)}>
                       {txn.status}
-                    </span>
+                    </Badge>
                   </td>
                 </tr>
               ))}
@@ -77,10 +115,12 @@ export function TransactionsPanel({ transactions, tenantName }: Props) {
           </table>
         </div>
       ) : (
-        <p className={panel.empty}>
-          No transactions — tenant is not linked to a payment provider.
-        </p>
+        <CardContent>
+          <p className="rounded-lg border border-dashed border-border bg-muted/40 px-4 py-10 text-center text-body-md text-muted-foreground">
+            No transactions — tenant is not linked to a payment provider.
+          </p>
+        </CardContent>
       )}
-    </section>
+    </Card>
   );
 }

@@ -204,17 +204,22 @@ Live verify still needs Slack app + tunnel + **active** plan for the tenant (Str
 - Each LLM adapter maps tiers to vendor model ids (Anthropic: Haiku / Sonnet; Ollama: `OLLAMA_MODEL_FAST` / `OLLAMA_MODEL_CAPABLE`)
 - Token usage → `usage_events` (`event_type=llm_tokens`) with the **resolved** model id from the adapter
 
-## LLM provider (Sprint 33)
+## LLM provider
 
-| `LLM_PROVIDER` | Backend |
-| -------------- | ------- |
-| `anthropic` (demo default) | Anthropic Messages API (`ANTHROPIC_API_KEY`, Haiku/Sonnet model envs) |
-| `ollama` | OpenAI-compatible `POST {OLLAMA_URL}/v1/chat/completions` |
-| `stub` | Deterministic offline reply for tests / laptop dry-runs |
+Role-named configuration lives in `api/app/agent/llm_config.py`. Registered `LLM_PROVIDER` ids:
 
-Offline is **`LLM_PROVIDER=stub`**. An empty `ANTHROPIC_API_KEY` no longer selects the stub by itself.
+| `LLM_PROVIDER` | Adapter shape | Required env |
+| -------------- | ------------- | ------------ |
+| `stub` | Offline deterministic replies | none |
+| `anthropic` | Native Messages API | `LLM_API_KEY` (or legacy `ANTHROPIC_API_KEY`), model tiers |
+| `ollama` | OpenAI-compatible HTTP (local) | `LLM_BASE_URL` or `OLLAMA_URL`, model tiers; key optional |
+| `openai_compat` | OpenAI-compatible HTTP (any host) | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_FAST`, `LLM_MODEL_CAPABLE` |
 
-Compose, the graph, and model-tier policy know only `ChatModel` + `fast` / `capable`. Vendor SDKs and model ids live in adapters (`api/app/agent/llm.py`); the Anthropic SDK is imported lazily inside that adapter.
+Prefer neutral vars: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_FAST`, `LLM_MODEL_CAPABLE`, `LLM_MAX_TOKENS`. Legacy `ANTHROPIC_*` and `OLLAMA_*` names remain as aliases.
+
+Offline tests use **`LLM_PROVIDER=stub`**. An empty API key no longer selects stub by itself.
+
+Compose, orchestrator, and executor know only `ChatModel` + `fast` / `capable`. Vendor SDKs and HTTP details live in adapters (`api/app/agent/llm.py`).
 
 ## Checkpointer (13.2)
 

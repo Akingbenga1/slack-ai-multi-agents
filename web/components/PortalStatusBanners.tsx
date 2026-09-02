@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import panel from "@/components/dashboard/panel.module.css";
 import { apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   accessToken: string | null;
@@ -33,10 +36,10 @@ type SyncStatus = {
   last_success: { finished_at?: string | null } | null;
 };
 
-const TONE_CLASS: Record<Banner["tone"], string> = {
-  warn: panel.warnBanner,
-  error: panel.error,
-  info: panel.infoBanner,
+const TONE_BADGE: Record<Banner["tone"], "warning" | "danger" | "default"> = {
+  warn: "warning",
+  error: "danger",
+  info: "default",
 };
 
 export function PortalStatusBanners({ accessToken, tenantId }: Props) {
@@ -136,13 +139,36 @@ export function PortalStatusBanners({ accessToken, tenantId }: Props) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.25rem" }}>
+    <div className="mb-8 flex flex-col gap-3">
       {banners.map((b) => (
-        <div key={b.key} role="status" className={TONE_CLASS[b.tone]}>
-          <p style={{ margin: "0 0 0.25rem", fontWeight: 600 }}>{b.title}</p>
-          <p style={{ margin: "0 0 0.5rem", color: "var(--muted)" }}>{b.body}</p>
-          <Link href={b.href}>{b.linkLabel}</Link>
-        </div>
+        <Card
+          key={b.key}
+          className={cn(
+            b.tone === "error" && "border-danger/30 bg-danger/5",
+            b.tone === "warn" && "border-warning/30 bg-warning/5",
+          )}
+        >
+          <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div role="status">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-body-md font-semibold text-foreground">{b.title}</p>
+                <Badge variant={TONE_BADGE[b.tone]}>
+                  {b.tone === "error" ? "Action needed" : "Setup"}
+                </Badge>
+              </div>
+              <p className="mt-1 text-body-md text-muted-foreground">{b.body}</p>
+            </div>
+            <Link
+              href={b.href}
+              className={cn(
+                buttonVariants({ variant: b.tone === "error" ? "default" : "secondary", size: "sm" }),
+                "shrink-0 rounded-full",
+              )}
+            >
+              {b.linkLabel}
+            </Link>
+          </CardContent>
+        </Card>
       ))}
     </div>
   );

@@ -25,6 +25,7 @@ from api.app.tenant import get_client_id
 from api.app.ingestion.routes import router as ingestion_router
 from api.app.uploads.routes import router as uploads_router
 from api.app.workflows.routes import router as workflows_router
+from api.app.tenant_files.routes import router as tenant_files_router
 
 configure_logging()
 logger = get_logger("api")
@@ -35,7 +36,26 @@ async def lifespan(_app: FastAPI):
     settings = get_settings()
     validate_security_settings(settings)
     logger.info("security_settings_ok app_env=%s", settings.app_env)
-    yield
+
+    if settings.slack_events_transport == "socket":
+        if settings.slack_socket_mode_enabled():
+            from api.app.slack.socket_mode import start_socket_mode
+
+            start_socket_mode(settings)
+            logger.info("slack_events_transport=socket")
+        else:
+            logger.warning(
+                "slack_events_transport=socket but SLACK_APP_TOKEN is missing; "
+                "Socket Mode listener not started"
+            )
+
+    try:
+        yield
+    finally:
+        if settings.slack_events_transport == "socket":
+            from api.app.slack.socket_mode import stop_socket_mode
+
+            stop_socket_mode()
 
 
 app = FastAPI(title="Client Slack AI Agents API", version="0.1.0", lifespan=lifespan)
@@ -64,6 +84,7 @@ app.include_router(slack_router)
 app.include_router(uploads_router)
 app.include_router(ingestion_router)
 app.include_router(workflows_router)
+app.include_router(tenant_files_router)
 
 
 @app.get("/health")

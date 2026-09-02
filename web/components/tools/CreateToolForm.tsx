@@ -3,11 +3,20 @@
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import panel from "@/components/dashboard/panel.module.css";
-import styles from "@/components/tools/tools.module.css";
+import { CheckCircle2, Globe, Server, Terminal } from "lucide-react";
 import { ToolDiscoveryPanel } from "@/components/tools/ToolDiscoveryPanel";
 import { McpToolDiscoveryPanel } from "@/components/tools/McpToolDiscoveryPanel";
 import { ApiError, apiClient } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   createMockTool,
   getMockMcpServers,
@@ -46,6 +55,29 @@ type McpDiscoverySelection = {
   source: string;
   metadata: Record<string, unknown>;
 };
+
+const inputClassName =
+  "w-full rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
+function FormField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      {hint ? (
+        <span className="mt-1 block text-sm text-muted-foreground">{hint}</span>
+      ) : null}
+      <div className="mt-2">{children}</div>
+    </label>
+  );
+}
 
 function buildCliConfig(
   command: string,
@@ -139,61 +171,30 @@ const KIND_CARDS: Array<{
   title: string;
   text: string;
   badge: string;
+  icon: typeof Terminal;
 }> = [
   {
     id: "cli",
     title: "CLI tool",
     text: "Run a shell command the agent can invoke on demand.",
     badge: "Command",
+    icon: Terminal,
   },
   {
     id: "mcp",
     title: "MCP tool",
     text: "Expose a capability from a connected MCP server.",
     badge: "Protocol",
+    icon: Server,
   },
   {
     id: "http",
     title: "HTTP request",
     text: "Call a REST endpoint with method, URL, and payload.",
     badge: "API",
+    icon: Globe,
   },
 ];
-
-const KIND_TONE: Record<CreateKind, string> = {
-  cli: styles.kindToneCli,
-  mcp: styles.kindToneMcp,
-  http: styles.kindToneHttp,
-};
-
-function KindIcon({ kind }: { kind: CreateKind }) {
-  if (kind === "cli") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
-        <polyline points="4 17 10 11 4 5" />
-        <line x1="12" y1="19" x2="20" y2="19" />
-      </svg>
-    );
-  }
-  if (kind === "mcp") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <path d="M14 17.5h7M17.5 14v7" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18" />
-      <path d="M12 3a14 14 0 0 1 0 18" />
-      <path d="M12 3a14 14 0 0 0 0 18" />
-    </svg>
-  );
-}
 
 export function CreateToolForm({
   cancelHref,
@@ -222,11 +223,9 @@ export function CreateToolForm({
   const [description, setDescription] = useState("");
   const [mcpServerId, setMcpServerId] = useState(mcpServers[0]?.id ?? "");
   const [cliCommand, setCliCommand] = useState("");
-  /** Discovery config snapshot kept until Create tool (CLI only). */
   const [cliConfig, setCliConfig] = useState<Record<string, unknown> | null>(
     null,
   );
-  /** Discovery snapshot kept until Create tool (MCP only). */
   const [mcpDiscovery, setMcpDiscovery] =
     useState<McpDiscoverySelection | null>(null);
   const [httpMethod, setHttpMethod] = useState("POST");
@@ -236,6 +235,7 @@ export function CreateToolForm({
   const [saving, setSaving] = useState(false);
 
   const activeKind = KIND_CARDS.find((card) => card.id === kind) ?? KIND_CARDS[0];
+  const ActiveIcon = activeKind.icon;
 
   const readiness = useMemo(() => {
     return [
@@ -329,7 +329,6 @@ export function CreateToolForm({
           return;
         }
 
-        // kind === "mcp": register mcp_servers + tool_registry together.
         if (mcpDiscovery) {
           const transport = normalizeMcpTransport(
             mcpDiscovery.metadata.transport,
@@ -363,7 +362,6 @@ export function CreateToolForm({
           return;
         }
 
-        // Fallback: link to an already-known mock/local MCP server id.
         const saved = await apiClient.post<ToolCreateResponse>("/tools", {
           accessToken: bearer,
           clientId: effectiveTenantId,
@@ -378,7 +376,6 @@ export function CreateToolForm({
         return;
       }
 
-      // HTTP still mock until that discovery flow saves to the API.
       if (existing.some((t) => t.name === toolName)) {
         setError(`A tool named "${toolName}" already exists.`);
         return;
@@ -403,26 +400,32 @@ export function CreateToolForm({
   if (createdName) {
     const tenantSuffix = selectedTenant ? ` for ${selectedTenant.name}` : "";
     return (
-      <div className={styles.createShell}>
-        <div className={styles.successCard}>
-          <div className={`${styles.successIcon} ${KIND_TONE[kind]}`}>
-            <KindIcon kind={kind} />
+      <Card>
+        <CardContent className="space-y-5 py-8">
+          <div className="flex items-start gap-4">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#ecfdf5] text-primary">
+              <CheckCircle2 className="h-6 w-6" />
+            </span>
+            <div>
+              <p className="text-headline-md text-foreground">Tool created</p>
+              <p className="mt-2 text-body-md text-muted-foreground">
+                <strong className="text-foreground">{createdName}</strong> (
+                {kind.toUpperCase()}){tenantSuffix} is ready to use.
+              </p>
+            </div>
           </div>
-          <h2 className={styles.successTitle}>Tool created</h2>
-          <p className={styles.successText}>
-            <strong>{createdName}</strong> ({kind.toUpperCase()}){tenantSuffix} is
-            ready to use.
-          </p>
-          <div className={styles.successActions}>
-            <button
+          <div className="flex flex-wrap gap-2">
+            <Button
               type="button"
-              className={panel.btnPrimary}
+              className="rounded-full"
               onClick={() => router.push(cancelHref)}
             >
               Back to tools
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
+              className="rounded-full"
               onClick={() => {
                 setCreatedName(null);
                 setName("");
@@ -434,361 +437,421 @@ export function CreateToolForm({
               }}
             >
               Create another
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className={styles.createShell}>
-      <nav className={styles.stepRail} aria-label="Create tool progress">
+    <div className="space-y-6">
+      <nav
+        aria-label="Create tool progress"
+        className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card px-5 py-4"
+      >
         {readiness.map((step, index) => (
-          <div
-            key={step.id}
-            className={`${styles.stepItem} ${step.done ? styles.stepDone : ""}`}
-          >
-            <span className={styles.stepIndex}>{index + 1}</span>
-            <span className={styles.stepLabel}>{step.label}</span>
+          <div key={step.id} className="flex items-center gap-2">
+            <span
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
+                step.done
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {index + 1}
+            </span>
+            <span
+              className={cn(
+                "text-sm",
+                step.done
+                  ? "font-medium text-foreground"
+                  : "text-muted-foreground",
+              )}
+            >
+              {step.label}
+            </span>
           </div>
         ))}
       </nav>
 
-      <div className={styles.createGrid}>
-        <aside className={styles.createAside}>
-          <section className={styles.asideCard}>
-            <p className={styles.asideEyebrow}>Selected type</p>
-            <div className={styles.asideTypeRow}>
-              <span className={`${styles.asideTypeIcon} ${KIND_TONE[kind]}`}>
-                <KindIcon kind={kind} />
-              </span>
-              <div>
-                <p className={styles.asideTypeTitle}>{activeKind.title}</p>
-                <p className={styles.asideTypeText}>{activeKind.text}</p>
-              </div>
-            </div>
-          </section>
+      {error ? (
+        <p
+          className="rounded-lg border border-danger-muted bg-danger-muted/40 px-4 py-3 text-body-md text-danger"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
 
-          <section className={styles.asideCard}>
-            <p className={styles.asideEyebrow}>Summary</p>
-            <dl className={styles.summaryList}>
-              <div>
-                <dt>Organisation</dt>
-                <dd>{selectedTenant?.name ?? "Current organisation"}</dd>
-              </div>
-              <div>
-                <dt>Type</dt>
-                <dd>{activeKind.badge}</dd>
-              </div>
-              <div>
-                <dt>Name</dt>
-                <dd>{name.trim() || "—"}</dd>
-              </div>
-            </dl>
-          </section>
-        </aside>
-
-        <div className={styles.createMain}>
-          {error ? (
-            <p className={panel.error} role="alert">
-              {error}
-            </p>
-          ) : null}
-
+      <form
+        onSubmit={(ev) => void onSubmit(ev)}
+        className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]"
+      >
+        <div className="space-y-6">
           {showTenantPicker ? (
-            <section className={styles.workspaceCard}>
-              <div className={styles.cardHead}>
-                <div>
-                  <h2 className={styles.cardTitle}>Organisation</h2>
-                  <p className={styles.cardDesc}>
-                    Assign this tool to a tenant before configuration.
-                  </p>
-                </div>
-              </div>
-              <label className={panel.formLabel}>
-                Organisation
-                <span className={panel.formHint}>Tools are registered per organisation</span>
-                <select
-                  value={tenantId}
-                  onChange={(ev) => onTenantChange(ev.target.value)}
-                  required
+            <Card>
+              <CardHeader className="border-b border-border">
+                <CardTitle className="text-headline-md">Organisation</CardTitle>
+                <CardDescription>
+                  Assign this tool to a tenant before configuration.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <FormField
+                  label="Organisation"
+                  hint="Tools are registered per organisation"
                 >
-                  {tenants?.map((tenant) => (
-                    <option key={tenant.id} value={tenant.id}>
-                      {tenant.name} ({tenant.slug})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </section>
+                  <select
+                    value={tenantId}
+                    onChange={(ev) => onTenantChange(ev.target.value)}
+                    required
+                    className={inputClassName}
+                  >
+                    {tenants?.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name} ({tenant.slug})
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+              </CardContent>
+            </Card>
           ) : tenantLabel ? (
-            <p className={styles.tenantChip}>
-              Creating for <strong>{tenantLabel}</strong>
-            </p>
+            <Card>
+              <CardContent className="py-5 text-body-md text-muted-foreground">
+                Creating for{" "}
+                <strong className="text-foreground">{tenantLabel}</strong>
+              </CardContent>
+            </Card>
           ) : null}
 
-          <section className={styles.workspaceCard}>
-            <div className={styles.cardHead}>
-              <div>
-                <h2 className={styles.cardTitle}>Tool type</h2>
-                <p className={styles.cardDesc}>
-                  Choose how the agent will invoke this capability.
-                </p>
-              </div>
-            </div>
-            <div className={styles.kindCards} role="radiogroup" aria-label="Tool type">
-              {KIND_CARDS.map((card) => {
-                const active = kind === card.id;
-                return (
-                  <button
-                    key={card.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    className={`${styles.kindCard} ${KIND_TONE[card.id]} ${
-                      active ? styles.kindCardActive : ""
-                    }`}
-                    onClick={() => {
-                      setKind(card.id);
-                      setCliConfig(null);
-                      setMcpDiscovery(null);
-                      setError(null);
-                    }}
-                  >
-                    <span className={styles.kindCardIcon}>
-                      <KindIcon kind={card.id} />
-                    </span>
-                    <span className={styles.kindCardBadge}>{card.badge}</span>
-                    <p className={styles.kindCardTitle}>{card.title}</p>
-                    <p className={styles.kindCardText}>{card.text}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <div className={styles.detailSplit}>
-            {kind === "cli" ? (
-              <ToolDiscoveryPanel
-                accessToken={accessToken}
-                onSelect={(tool) => {
-                  setName(tool.name);
-                  setDescription(tool.summary);
-                  const command =
-                    typeof tool.config?.command === "string"
-                      ? tool.config.command.trim()
-                      : "";
-                  setCliCommand(command || tool.name);
-                  setCliConfig(
-                    tool.config && typeof tool.config === "object"
-                      ? { ...tool.config }
-                      : null,
-                  );
-                  setError(null);
-                }}
-              />
-            ) : kind === "mcp" ? (
-              <McpToolDiscoveryPanel
-                accessToken={accessToken}
-                onSelect={(tool) => {
-                  setName(tool.name);
-                  setDescription(tool.summary);
-                  setMcpDiscovery({
-                    id: tool.id,
-                    name: tool.name,
-                    source: tool.source,
-                    metadata:
-                      tool.metadata && typeof tool.metadata === "object"
-                        ? { ...tool.metadata }
-                        : {},
-                  });
-                  const match = mcpServers.find(
-                    (s) =>
-                      s.name === tool.name ||
-                      s.name === tool.id ||
-                      tool.id.endsWith(`/${s.name}`),
-                  );
-                  if (match) {
-                    setMcpServerId(match.id);
-                  }
-                  setError(null);
-                }}
-              />
-            ) : (
-              <section className={styles.workspaceCard}>
-                <div className={styles.cardHead}>
-                  <div>
-                    <h2 className={styles.cardTitle}>Tool discovery</h2>
-                    <p className={styles.cardDesc}>
-                      Online discovery is available for CLI and MCP tools. Configure this{" "}
-                      {kind.toUpperCase()} tool manually on the right.
-                    </p>
-                  </div>
-                </div>
-                <div className={styles.discoveryIdle}>
-                  <p className={panel.meta}>
-                    Switch to <strong>CLI tool</strong> or <strong>MCP tool</strong> to
-                    search discovery endpoints.
-                  </p>
-                </div>
-              </section>
-            )}
-
-            <form
-              className={styles.workspaceCard}
-              onSubmit={(ev) => void onSubmit(ev)}
-            >
-              <div className={styles.cardHead}>
-                <div>
-                  <h2 className={styles.cardTitle}>Configuration</h2>
-                  <p className={styles.cardDesc}>
-                    Define identity and runtime details for this {kind.toUpperCase()}{" "}
-                    tool.
-                  </p>
-                </div>
-              </div>
-
-              <div className={styles.configGrid}>
-                <label className={panel.formLabel}>
-                  Tool name
-                  <span className={panel.formHint}>Unique per organisation</span>
-                  <input
-                    value={name}
-                    onChange={(ev) => setName(ev.target.value)}
-                    required
-                    placeholder={
-                      kind === "cli"
-                        ? "run_export"
-                        : kind === "mcp"
-                          ? "search_knowledge"
-                          : "notify_webhook"
-                    }
-                  />
-                </label>
-                <label className={`${panel.formLabel} ${styles.configFull}`}>
-                  Description
-                  <textarea
-                    value={description}
-                    onChange={(ev) => setDescription(ev.target.value)}
-                    rows={3}
-                    placeholder="What the agent should use this tool for"
-                  />
-                </label>
-
-                {kind === "cli" ? (
-                  <label className={`${panel.formLabel} ${styles.configFull}`}>
-                    CLI command
-                    <span className={panel.formHint}>
-                      Executed when the agent calls this tool
-                    </span>
-                    <input
-                      value={cliCommand}
-                      onChange={(ev) => setCliCommand(ev.target.value)}
-                      required
-                      placeholder="uv run python scripts/my_tool.py"
-                      className={styles.monoInput}
-                    />
-                  </label>
-                ) : null}
-
-                {kind === "mcp" ? (
-                  mcpDiscovery ? (
-                    <div className={`${panel.formLabel} ${styles.configFull}`}>
-                      <span>MCP server (from discovery)</span>
-                      <span className={panel.formHint}>
-                        Create registers the server and tool together
-                      </span>
-                      <p className={panel.meta} style={{ marginTop: "0.35rem" }}>
-                        <strong>{mcpDiscovery.name}</strong>
-                        {typeof mcpDiscovery.metadata.transport === "string"
-                          ? ` · ${normalizeMcpTransport(mcpDiscovery.metadata.transport)}`
-                          : ""}
-                        {mcpDiscovery.source ? (
-                          <>
-                            <br />
-                            <span className={styles.monoInput}>
-                              {mcpDiscovery.source}
-                            </span>
-                          </>
-                        ) : null}
+          <Card>
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-headline-md">Tool type</CardTitle>
+              <CardDescription>
+                Choose how the agent will invoke this capability.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div
+                role="radiogroup"
+                aria-label="Tool type"
+                className="grid gap-3 sm:grid-cols-3"
+              >
+                {KIND_CARDS.map((card) => {
+                  const active = kind === card.id;
+                  const Icon = card.icon;
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => {
+                        setKind(card.id);
+                        setCliConfig(null);
+                        setMcpDiscovery(null);
+                        setError(null);
+                      }}
+                      className={cn(
+                        "rounded-xl border p-4 text-left transition-colors",
+                        active
+                          ? "border-primary bg-[#ecfdf5] ring-2 ring-primary/20"
+                          : "border-border bg-card hover:bg-muted/40",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span
+                          className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-lg",
+                            active
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <Badge variant={active ? "default" : "muted"}>
+                          {card.badge}
+                        </Badge>
+                      </div>
+                      <p className="mt-3 text-sm font-semibold text-foreground">
+                        {card.title}
                       </p>
-                      <button
-                        type="button"
-                        className={styles.cancelLink}
-                        onClick={() => setMcpDiscovery(null)}
-                        style={{ marginTop: "0.5rem" }}
-                      >
-                        Clear discovery selection
-                      </button>
-                    </div>
-                  ) : (
-                    <label className={`${panel.formLabel} ${styles.configFull}`}>
-                      MCP server
-                      <span className={panel.formHint}>
-                        Prefer Use from discovery, or pick an existing server
-                      </span>
-                      <select
-                        value={mcpServerId}
-                        onChange={(ev) => setMcpServerId(ev.target.value)}
-                      >
-                        {mcpServers.length === 0 ? (
-                          <option value="">
-                            No local servers — search discovery and Use a result
-                          </option>
-                        ) : (
-                          mcpServers.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name} ({s.transport})
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </label>
-                  )
-                ) : null}
-
-                {kind === "http" ? (
-                  <>
-                    <label className={panel.formLabel}>
-                      HTTP method
-                      <select
-                        value={httpMethod}
-                        onChange={(ev) => setHttpMethod(ev.target.value)}
-                      >
-                        <option value="GET">GET</option>
-                        <option value="POST">POST</option>
-                        <option value="PUT">PUT</option>
-                        <option value="PATCH">PATCH</option>
-                        <option value="DELETE">DELETE</option>
-                      </select>
-                    </label>
-                    <label className={panel.formLabel}>
-                      Request URL
-                      <input
-                        type="url"
-                        value={httpUrl}
-                        onChange={(ev) => setHttpUrl(ev.target.value)}
-                        required
-                        placeholder="https://api.example.com/tools/run"
-                      />
-                    </label>
-                  </>
-                ) : null}
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {card.text}
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
+            </CardContent>
+          </Card>
 
-              <div className={styles.formFooter}>
-                <Link href={cancelHref} className={styles.cancelLink}>
+          {kind === "cli" ? (
+            <ToolDiscoveryPanel
+              accessToken={accessToken}
+              onSelect={(tool) => {
+                setName(tool.name);
+                setDescription(tool.summary);
+                const command =
+                  typeof tool.config?.command === "string"
+                    ? tool.config.command.trim()
+                    : "";
+                setCliCommand(command || tool.name);
+                setCliConfig(
+                  tool.config && typeof tool.config === "object"
+                    ? { ...tool.config }
+                    : null,
+                );
+                setError(null);
+              }}
+            />
+          ) : kind === "mcp" ? (
+            <McpToolDiscoveryPanel
+              accessToken={accessToken}
+              onSelect={(tool) => {
+                setName(tool.name);
+                setDescription(tool.summary);
+                setMcpDiscovery({
+                  id: tool.id,
+                  name: tool.name,
+                  source: tool.source,
+                  metadata:
+                    tool.metadata && typeof tool.metadata === "object"
+                      ? { ...tool.metadata }
+                      : {},
+                });
+                const match = mcpServers.find(
+                  (s) =>
+                    s.name === tool.name ||
+                    s.name === tool.id ||
+                    tool.id.endsWith(`/${s.name}`),
+                );
+                if (match) {
+                  setMcpServerId(match.id);
+                }
+                setError(null);
+              }}
+            />
+          ) : (
+            <Card>
+              <CardHeader className="border-b border-border">
+                <CardTitle className="text-headline-md">Tool discovery</CardTitle>
+                <CardDescription>
+                  Online discovery is available for CLI and MCP tools. Configure
+                  this HTTP tool manually below.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6 text-body-md text-muted-foreground">
+                Switch to <strong className="text-foreground">CLI tool</strong> or{" "}
+                <strong className="text-foreground">MCP tool</strong> to search
+                discovery endpoints.
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-headline-md">Configuration</CardTitle>
+              <CardDescription>
+                Define identity and runtime details for this{" "}
+                {kind.toUpperCase()} tool.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5 pt-6">
+              <FormField label="Tool name" hint="Unique per organisation">
+                <input
+                  value={name}
+                  onChange={(ev) => setName(ev.target.value)}
+                  required
+                  placeholder={
+                    kind === "cli"
+                      ? "run_export"
+                      : kind === "mcp"
+                        ? "search_knowledge"
+                        : "notify_webhook"
+                  }
+                  className={inputClassName}
+                />
+              </FormField>
+
+              <FormField label="Description">
+                <textarea
+                  value={description}
+                  onChange={(ev) => setDescription(ev.target.value)}
+                  rows={3}
+                  placeholder="What the agent should use this tool for"
+                  className={cn(inputClassName, "min-h-[5.5rem] resize-y")}
+                />
+              </FormField>
+
+              {kind === "cli" ? (
+                <FormField
+                  label="CLI command"
+                  hint="Executed when the agent calls this tool"
+                >
+                  <input
+                    value={cliCommand}
+                    onChange={(ev) => setCliCommand(ev.target.value)}
+                    required
+                    placeholder="uv run python scripts/my_tool.py"
+                    className={cn(inputClassName, "font-mono text-[13px]")}
+                  />
+                </FormField>
+              ) : null}
+
+              {kind === "mcp" ? (
+                mcpDiscovery ? (
+                  <div className="rounded-lg border border-border bg-[#f8fafc] p-4">
+                    <p className="text-sm font-medium text-foreground">
+                      MCP server (from discovery)
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Create registers the server and tool together.
+                    </p>
+                    <p className="mt-3 text-sm text-foreground">
+                      <strong>{mcpDiscovery.name}</strong>
+                      {typeof mcpDiscovery.metadata.transport === "string"
+                        ? ` · ${normalizeMcpTransport(mcpDiscovery.metadata.transport)}`
+                        : ""}
+                      {mcpDiscovery.source ? (
+                        <>
+                          <br />
+                          <span className="text-muted-foreground">
+                            {mcpDiscovery.source}
+                          </span>
+                        </>
+                      ) : null}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setMcpDiscovery(null)}
+                    >
+                      Clear discovery selection
+                    </Button>
+                  </div>
+                ) : (
+                  <FormField
+                    label="MCP server"
+                    hint="Prefer Use from discovery, or pick an existing server"
+                  >
+                    <select
+                      value={mcpServerId}
+                      onChange={(ev) => setMcpServerId(ev.target.value)}
+                      className={inputClassName}
+                    >
+                      {mcpServers.length === 0 ? (
+                        <option value="">
+                          No local servers — search discovery and Use a result
+                        </option>
+                      ) : (
+                        mcpServers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.transport})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </FormField>
+                )
+              ) : null}
+
+              {kind === "http" ? (
+                <>
+                  <FormField label="HTTP method">
+                    <select
+                      value={httpMethod}
+                      onChange={(ev) => setHttpMethod(ev.target.value)}
+                      className={inputClassName}
+                    >
+                      <option value="GET">GET</option>
+                      <option value="POST">POST</option>
+                      <option value="PUT">PUT</option>
+                      <option value="PATCH">PATCH</option>
+                      <option value="DELETE">DELETE</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Request URL">
+                    <input
+                      type="url"
+                      value={httpUrl}
+                      onChange={(ev) => setHttpUrl(ev.target.value)}
+                      required
+                      placeholder="https://api.example.com/tools/run"
+                      className={cn(inputClassName, "font-mono text-[13px]")}
+                    />
+                  </FormField>
+                </>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2 border-t border-border pt-5">
+                <Button type="submit" className="rounded-full" disabled={saving}>
+                  {saving ? "Saving…" : "Create tool"}
+                </Button>
+                <Link
+                  href={cancelHref}
+                  className={buttonVariants({ variant: "secondary" })}
+                >
                   Cancel
                 </Link>
-                <button type="submit" className={panel.btnPrimary} disabled={saving}>
-                  {saving ? "Saving…" : "Create tool"}
-                </button>
               </div>
-            </form>
-          </div>
+            </CardContent>
+          </Card>
         </div>
-      </div>
+
+        <aside className="space-y-6">
+          <Card>
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-headline-md">Selected type</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#ecfdf5] text-primary">
+                  <ActiveIcon className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="font-medium text-foreground">{activeKind.title}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {activeKind.text}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-headline-md">Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-6 text-sm">
+              <div className="flex flex-col gap-1 border-b border-border pb-3">
+                <span className="text-muted-foreground">Organisation</span>
+                <span className="font-medium text-foreground">
+                  {selectedTenant?.name ?? "Current organisation"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1 border-b border-border pb-3">
+                <span className="text-muted-foreground">Type</span>
+                <span className="font-medium text-foreground">
+                  {activeKind.badge}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-muted-foreground">Name</span>
+                <span className="font-medium text-foreground">
+                  {name.trim() || "—"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      </form>
     </div>
   );
 }

@@ -15,6 +15,7 @@ export default async function AdminAgentTracePage() {
           { label: "Overview", href: "/admin" },
           { label: "Agent trace" },
         ]}
+        className="mb-8"
       />
       <AgentTracePanel accessToken={session?.accessToken ?? null} />
     </>

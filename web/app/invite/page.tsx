@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { InvitePanel } from "@/components/InvitePanel";
+import { PublicAuthFooterLink, PublicAuthShell } from "@/components/auth/PublicAuthShell";
 import { sessionTenantId } from "@/lib/tenant";
 
 type Props = {
@@ -17,7 +17,6 @@ function param(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
-/** Public accept URL (`/invite?token=…`). Create-invite UI lives under `/app/invite`. */
 export default async function InviteAcceptPage({ searchParams }: Props) {
   const session = await getServerSession(authOptions);
   const params = (await searchParams) ?? {};
@@ -29,40 +28,42 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
     redirect("/app/invite");
   }
 
+  const footer = token ? (
+    <>
+      Wrong page? <PublicAuthFooterLink href="/login">Sign in</PublicAuthFooterLink>
+    </>
+  ) : isOrgAdmin ? (
+    <>
+      <PublicAuthFooterLink href="/app/team">Manage team</PublicAuthFooterLink>
+      {" · "}
+      <PublicAuthFooterLink href="/app">Org portal</PublicAuthFooterLink>
+    </>
+  ) : (
+    <>
+      Have an invite link? Open it in your browser. Otherwise{" "}
+      <PublicAuthFooterLink href="/login">sign in</PublicAuthFooterLink>
+      {" or "}
+      <PublicAuthFooterLink href="/signup">create an organisation</PublicAuthFooterLink>.
+    </>
+  );
+
   return (
-    <main
-      style={{
-        padding: "2rem",
-        fontFamily: "system-ui, sans-serif",
-        maxWidth: 640,
-        margin: "0 auto",
-      }}
+    <PublicAuthShell
+      title={token ? "Accept invitation" : "Team invitation"}
+      description={
+        token
+          ? "Set your password to join the organisation you were invited to."
+          : "Use the invitation link you received from your organisation admin."
+      }
+      maxWidth="lg"
+      footer={footer}
     >
-      <h1 style={{ marginTop: 0 }}>{token ? "Accept invite" : "Invite / membership"}</h1>
-      {!token ? (
-        <p>
-          Org admins invite teammates from the portal. Open a magic-link invite you were
-          given, or sign in to create one.
-        </p>
-      ) : (
-        <p>Join the organisation you were invited to. This does not create a new organisation.</p>
-      )}
       <InvitePanel
         accessToken={session?.accessToken ?? null}
         tenantId={tenantId}
         inviteToken={token}
         isOrgAdmin={!!isOrgAdmin}
       />
-      <p style={{ marginTop: "1.5rem" }}>
-        <Link href="/app">Org portal</Link> · <Link href="/login">Login</Link> ·{" "}
-        <Link href="/signup">Signup</Link>
-        {isOrgAdmin ? (
-          <>
-            {" · "}
-            <Link href="/app/invite">Invite team</Link>
-          </>
-        ) : null}
-      </p>
-    </main>
+    </PublicAuthShell>
   );
 }

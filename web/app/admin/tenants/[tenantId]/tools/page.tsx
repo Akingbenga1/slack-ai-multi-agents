@@ -21,6 +21,7 @@ export default async function AdminTenantToolsPage({ params }: Props) {
           { label: tenantName, href: `/admin/tenants/${tenantId}` },
           { label: "Tools" },
         ]}
+        className="mb-8"
       />
       <ToolsManagerPanel
         tenantLabel={tenantName}

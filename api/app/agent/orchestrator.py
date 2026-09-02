@@ -93,7 +93,11 @@ _PLAN_SYSTEM = (
     "transformation. When a step creates a new file in the working directory, do not "
     "add a follow-up step to upload, save, or re-register that same artifact unless "
     "the user explicitly asked for a separate delivery action. Describe in "
-    "success_criteria what each step produces."
+    "success_criteria what each step produces. "
+    "When the user attached a file and the request is a single transformation on that "
+    "file (split, convert, merge, extract, export), plan one execute_goal step that "
+    "delivers the outcome directly. Do not add separate validation, readability, "
+    "existence-check, or inspect steps when attachment metadata is already present."
 )
 
 

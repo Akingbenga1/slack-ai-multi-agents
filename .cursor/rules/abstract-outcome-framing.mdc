@@ -1,0 +1,68 @@
+---
+description: Mandatory — read and apply before any feature discussion or code change. Abstract capabilities and contracts, not instances.
+alwaysApply: true
+---
+
+# Abstract, scalable framing
+
+**This rule is mandatory.** Read it at the start of every feature discussion, spec, or code change in this repo. Do not propose designs or write implementation until its requirements below are satisfied.
+
+## When this rule applies (no exceptions)
+
+- **Feature and design discussions** — new capabilities, behaviour changes, architecture, specs, fixes motivated by a reported incident
+- **Code updates** — any edit under shared/core paths, configuration, prompts, verification, factories, or APIs consumed by more than one caller
+- **Reviews and explanations** — when describing why something should be built a given way
+
+If the work touches how the system behaves beyond a single private script, this rule governs it.
+
+## Required workflow
+
+### Before discussing or proposing a feature change
+
+1. **Restate the capability contract** — what inputs, guarantees, and observable outcomes must hold when work is complete (roles and outcomes, not today's example).
+2. **Separate intent from instance** — name the class of cases the change must serve; treat the user's story as motivation only, not as the permanent shape of the solution.
+3. **Locate core vs adapter** — shared logic stays domain-neutral; anything tied to one backend, format, or deployment detail belongs at the edge.
+4. **Extension test** — state explicitly whether a different backend, payload shape, or domain would require rewriting the centre or only plugging in at the boundary. If the centre would change, redesign before proposing.
+
+Do not lead with concrete instances (specific vendors, formats, filenames, error strings, env var names keyed to one integration) as the proposed solution.
+
+### Before implementing or editing code
+
+1. **Re-read this rule** — implementation must follow the contract agreed (or implied) in design, not re-derive shape from the nearest existing file or incident.
+2. **Implement mechanisms** — interfaces, extension points, role-named configuration, verification against outcomes — not branches keyed to one scenario.
+3. **Reject instance leakage** — do not copy incident-specific language into core modules, shared prompts, or permanent docs; do not add special cases when a general rule belongs.
+4. **Verify against the contract** — where verification matters, confirm observable outcomes, not only logs, return codes, or tool self-report.
+
+If a planned diff encodes only the current example into shared code, stop and generalize before writing.
+
+## How to think
+
+1. **Separate intent from instance** — A reported issue shows *that* something failed; the fix addresses *why* the system could not handle a class of cases.
+2. **Design mechanisms, not patches** — Reusable rules, interfaces, and extension points — not branches keyed to a single scenario, error message, or technology.
+3. **Contracts over anecdotes** — State what must be true when work is complete. New domains plug in without rewriting core logic.
+4. **Core vs adapter** — Shared layers stay domain-neutral; specifics live at the edges behind clear boundaries.
+5. **Signals are not proof** — Logs, return codes, and self-reported status are hints. Durable behavior validates actual outcomes against the contract.
+6. **Exploration is not delivery** — Probes and partial attempts are not finished work until the contracted outcome is met and, where relevant, independently confirmed.
+7. **Examples inform; they do not specify** — Never let one story become the permanent shape of shared code or docs.
+
+## Before proposing or shipping a change
+
+- Does this still make sense for cases we have not seen yet?
+- If the underlying domain changed, would we rewrite the core or only an adapter?
+- Are we encoding a one-off workaround where a general rule belongs?
+- Do names, APIs, and docs describe **roles and outcomes**, not a single tool, format, or failure mode?
+
+## What to avoid in shared paths
+
+- Hardcoded assumptions tied to one scenario, stack choice, payload shape, or error text
+- Copy-pasting incident-specific language into core modules, prompts, or permanent documentation
+- Special cases that multiply instead of converging on one extensible pattern
+- **Concrete-framing drift** — answering a general design question with a solution shaped only for the example on the screen
+
+## Default stance
+
+Optimize for **scalable system behaviour**: fewer special cases, clearer contracts, and implementations that grow by extension rather than by rewriting the centre for each new request.
+
+## Compliance
+
+Treat violation of this rule as a blocking defect in design and in code review — same as a failing test or broken contract. When in doubt, generalize the mechanism before shipping.

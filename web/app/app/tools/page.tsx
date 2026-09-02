@@ -11,6 +11,7 @@ export default function OrgToolsPage() {
           { label: "Overview", href: "/app" },
           { label: "Tools" },
         ]}
+        className="mb-8"
       />
       <ToolsManagerPanel createHref="/app/tools/new" />
     </>
