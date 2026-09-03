@@ -140,8 +140,34 @@ class Settings(BaseSettings):
 
     # Executor agent LLM loop (Sprint 48)
     executor_max_tool_rounds: int = 10
-    # English-goal + real uvx ReAct attempts per plan step
-    executor_uvx_max_attempts: int = 8
+    # English-goal + real uvx ReAct attempts per plan step.
+    # Override with EXECUTOR_UVX_MAX_ATTEMPTS when a run needs a larger budget.
+    executor_uvx_max_attempts: int = 12
+    # Empty completions (no text, no tool calls) get a separate continuation
+    # budget so they do not consume delivering tool attempts.
+    executor_empty_continuations: int = 2
+    # Wall-clock ceiling for one plan step's ReAct loop, independent of the
+    # action budget, so a step cannot run indefinitely on slow tool installs.
+    executor_step_timeout_seconds: float = 900.0
+    # Consecutive failed actions tolerated before one structured reflection
+    # turn is injected to force a strategy change instead of blind retries.
+    executor_reflect_after_failures: int = 3
+    # Identical repeated actions tolerated before the loop stops for stalling.
+    executor_max_repeated_actions: int = 2
+    # Per-observation stdout/stderr budget kept in the model transcript; the
+    # full text is still recorded on the step result for tracing.
+    executor_observation_chars: int = 4000
+
+    # Agent run workspaces (isolated per plan step; inputs copied in, never
+    # mutated in place). Relative paths resolve from the project root.
+    agent_workspace_root: str = "data/workspaces"
+    # Retain workspace directories after a run for debugging and trace replay.
+    agent_workspace_keep: bool = True
+    # Libraries the model may inject into `uvx --with … python`. Empty means
+    # any validly-named PyPI distribution is allowed.
+    agent_python_libs_allowlist: str = ""
+    # Cap on libraries injected into a single run_python action.
+    agent_python_max_libs: int = 8
 
     # CLI tool execution (Sprint 47)
     cli_tools_enabled: bool = True

@@ -49,10 +49,16 @@ def extension_of(filename: str) -> str:
 
 
 def validate_upload_filename(file_role: FileRole, filename: str) -> str:
-    """Return sanitized filename or raise ValueError."""
+    """Return sanitized filename or raise ValueError.
+
+    Sanitization always applies; the extension allowlist applies only to roles
+    that declare one (see ``allowed_extensions``).
+    """
     safe = sanitize_filename(filename)
-    ext = extension_of(safe)
     allowed = allowed_extensions(file_role)
+    if allowed is None:
+        return safe
+    ext = extension_of(safe)
     if ext not in allowed:
         raise ValueError(
             f"Extension {ext or '(none)'} not allowed for file_role={file_role}; "

@@ -24,10 +24,14 @@ def attachment_from_upload_bytes(
     content_type: str | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Store bytes via BlobStore (no ingest) and return dry-run attachment dict."""
+    """Store bytes via BlobStore (no ingest) and return dry-run attachment dict.
+
+    Uses the agent-attachment role so any payload type reaches the executor;
+    these bytes are never parsed or ingested, so no extension policy applies.
+    """
     stored = store_upload(
         client_id=str(client_id).strip(),
-        file_role=FileRole.DOCUMENT,
+        file_role=FileRole.AGENT_ATTACHMENT,
         filename=filename or "upload.bin",
         data=data,
         content_type=content_type,

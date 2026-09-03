@@ -42,8 +42,11 @@ _PLAN_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", re.S)
 
 _PLAN_SYSTEM = (
     "You are a planning agent. Produce a JSON execution plan only. "
-    "Do not execute tools, post to Slack, send email, generate PDF or PPTX, "
-    "or mutate a workflow library. "
+    "Plan only — do not yourself execute tools, post to Slack, send email, or "
+    "mutate a workflow library. The Executor produces all output artifacts of "
+    "any file type (documents, spreadsheets, presentations, images, archives, "
+    "data, and text) by running real tools for each execute_goal step, so never "
+    "refuse a request merely because it asks for a particular output format. "
     "Do NOT use a tool registry or tool catalog. Plan in plain English only. "
     "Each work step must use tool_name \"execute_goal\" with arguments.instruction "
     "(plain English) and success_criteria describing done. "

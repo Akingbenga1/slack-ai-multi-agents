@@ -151,6 +151,71 @@ def test_anthropic_maps_tools_and_parses_tool_use_without_executing(monkeypatch)
     boom.assert_not_called()
 
 
+def test_anthropic_maps_required_tool_choice_and_stop_reason():
+    settings = Settings(
+        llm_provider="anthropic",
+        anthropic_api_key="sk-test",
+        anthropic_model_haiku="claude-haiku-fixture",
+    )
+    client = MagicMock()
+    client.messages.create.return_value = SimpleNamespace(
+        content=[],
+        usage=SimpleNamespace(input_tokens=4, output_tokens=2),
+        stop_reason="end_turn",
+    )
+    model = AnthropicChatModel(settings, client=client)
+    result = model.complete(
+        system="sys",
+        messages=[{"role": "user", "content": "q"}],
+        model_tier="fast",
+        tools=[_SEARCH],
+        tool_choice="required",
+    )
+    assert result.is_empty
+    assert result.stop_reason == "end_turn"
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["tool_choice"] == {"type": "any"}
+
+
+def test_openai_compat_maps_required_tool_choice_and_stop_reason():
+    settings = Settings(
+        llm_provider="ollama",
+        ollama_url="http://ollama.test",
+        ollama_model_fast="tag-fast",
+        ollama_max_tokens=64,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["tool_choice"] == "required"
+        return httpx.Response(
+            200,
+            json={
+                "model": "tag-fast",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": ""},
+                    }
+                ],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 0},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, base_url="http://ollama.test") as client:
+        model = OllamaChatModel(settings, http_client=client, max_retries=1)
+        result = model.complete(
+            system="sys",
+            messages=[{"role": "user", "content": "q"}],
+            model_tier="fast",
+            tools=[_SEARCH],
+            tool_choice="required",
+        )
+    assert result.is_empty
+    assert result.stop_reason == "stop"
+
+
 def test_anthropic_omit_tools_does_not_send_vendor_tools():
     settings = Settings(
         llm_provider="anthropic",

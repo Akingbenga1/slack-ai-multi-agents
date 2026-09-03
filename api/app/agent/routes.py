@@ -95,6 +95,8 @@ class DryRunResponse(BaseModel):
     status: str | None = None
     orchestrator_user_prompt: str | None = None
     plan_steps: list[dict[str, Any]] | None = None
+    step_diagnostics: list[dict[str, Any]] | None = None
+    delivered_files: list[str] = Field(default_factory=list)
     attachment: DryRunAttachmentInfo | None = None
     attachments: list[DryRunAttachmentInfo] = Field(default_factory=list)
 
@@ -397,6 +399,12 @@ async def agent_dry_run(
             if include_trace
             else None
         ),
+        step_diagnostics=(
+            list(result.extra.get("step_diagnostics") or [])
+            if include_trace
+            else None
+        ),
+        delivered_files=list(result.extra.get("delivered_files") or []),
         attachment=attachment_info,
         attachments=attachment_infos,
     )

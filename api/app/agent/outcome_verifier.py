@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 _ARTIFACT_SIGNALS = re.compile(
     r"\b("
@@ -95,8 +95,36 @@ def goal_kind(criteria: str, instruction: str) -> str:
 
 
 def expects_multiple_artifacts(criteria: str, instruction: str = "") -> bool:
+    """Whether wording *suggests* several outputs.
+
+    Advisory only. The same words describe distribution inside one artifact
+    ("a footer on every page") and a set of artifacts ("one file per sheet"),
+    so this widens where verification looks and never raises the bar.
+    """
     combined = f"{criteria} {instruction}".strip()
     return bool(combined and _MULTI_ARTIFACT_SIGNALS.search(combined))
+
+
+def declared_artifact_count(raw: Any) -> int | None:
+    """Output cardinality when a contract states it explicitly.
+
+    Extension point for structured contracts: a planner may pass
+    ``success_criteria`` as a mapping carrying an exact expected count. Absent
+    a declaration, callers fall back to the safe floor of one artifact.
+    """
+    if not isinstance(raw, dict):
+        return None
+    for key in ("expected_artifact_count", "artifact_count", "expected_outputs"):
+        value = raw.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            parsed = int(value.strip())
+            if parsed > 0:
+                return parsed
+    return None
 
 
 def expects_original_preserved(criteria: str, instruction: str = "") -> bool:
@@ -139,19 +167,90 @@ def _output_dir_from_attempt(attempt: dict[str, Any], scope: Path | None) -> Pat
     return infer_output_dir_from_args(args, cwd=cwd)
 
 
+def existing_files_in_scope(scope_dir: str | Path | None) -> set[Path]:
+    """All files under a working scope at one moment (verification baseline)."""
+    if not scope_dir:
+        return set()
+    root = Path(scope_dir)
+    if not root.is_dir():
+        return set()
+    found: set[Path] = set()
+    for entry in root.rglob("*"):
+        if not entry.is_file():
+            continue
+        try:
+            found.add(entry.resolve())
+        except OSError:
+            continue
+    return found
+
+
+def _normalize_file_set(raw: Sequence[str | Path] | None) -> set[Path]:
+    out: set[Path] = set()
+    for item in raw or []:
+        path = Path(str(item))
+        try:
+            if path.is_file():
+                out.add(path.resolve())
+        except OSError:
+            continue
+    return out
+
+
+def _excluded_artifact_paths(
+    *,
+    known_inputs: Sequence[str | Path] | None,
+    baseline_files: Sequence[str | Path] | set[Path] | None,
+) -> set[Path]:
+    """Inputs and pre-step files cannot satisfy a produced-artifact contract."""
+    excluded = _normalize_file_set(known_inputs)
+    if isinstance(baseline_files, set):
+        for path in baseline_files:
+            try:
+                if path.is_file():
+                    excluded.add(path.resolve())
+            except OSError:
+                continue
+    else:
+        excluded |= _normalize_file_set(baseline_files)
+    return excluded
+
+
+def _novel_artifacts(paths: Sequence[Path], excluded: set[Path]) -> list[Path]:
+    novel: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved in excluded or resolved in seen:
+            continue
+        if not resolved.is_file() or resolved.stat().st_size <= 0:
+            continue
+        seen.add(resolved)
+        novel.append(resolved)
+    return novel
+
+
 def _artifacts_in_scope(
     scope: Path,
     *,
     extensions: set[str] | None = None,
     min_count: int = 1,
+    exclude: set[Path] | None = None,
 ) -> list[Path]:
     found: list[Path] = []
+    blocked = exclude or set()
     for entry in scope.rglob("*"):
         if not entry.is_file() or entry.stat().st_size <= 0:
             continue
         if extensions and entry.suffix.lower() not in extensions:
             continue
-        found.append(entry.resolve())
+        resolved = entry.resolve()
+        if resolved in blocked:
+            continue
+        found.append(resolved)
     if len(found) < min_count:
         return []
     return found
@@ -203,50 +302,48 @@ def _artifact_path_from_payload(payload: dict[str, Any]) -> Path | None:
     return paths[0] if paths else None
 
 
+def _artifact_found(paths: Sequence[Path], *, source: str = "") -> VerificationResult:
+    if len(paths) == 1:
+        return VerificationResult(True, f"artifact verified at {paths[0]}", "artifact")
+    suffix = f" from {source}" if source else ""
+    return VerificationResult(
+        True, f"verified {len(paths)} artifacts{suffix}", "artifact"
+    )
+
+
 def _verify_artifact(
     criteria: str,
     result: dict[str, Any],
     *,
     scope: Path | None,
     instruction: str = "",
+    excluded: set[Path] | None = None,
+    required_count: int | None = None,
 ) -> VerificationResult:
-    direct_paths = _artifact_paths_from_payload(result)
-    if direct_paths:
-        if expects_multiple_artifacts(criteria, instruction):
-            if len(direct_paths) >= 2:
-                return VerificationResult(
-                    True,
-                    f"verified {len(direct_paths)} artifacts",
-                    "artifact",
-                )
-        else:
-            return VerificationResult(
-                True, f"artifact verified at {direct_paths[0]}", "artifact"
-            )
+    blocked = excluded or set()
+    # Only a declared count raises the bar. Cardinality guessed from wording is
+    # a search hint, so a contract is never failed for producing one artifact
+    # when nothing declared that several were due.
+    required = max(1, int(required_count or 1))
+    widen_search = expects_multiple_artifacts(criteria, instruction)
+
+    direct_paths = _novel_artifacts(_artifact_paths_from_payload(result), blocked)
+    if len(direct_paths) >= required:
+        return _artifact_found(direct_paths)
 
     attempts = result.get("attempts")
     if isinstance(attempts, list):
         collected: list[Path] = []
         for attempt in reversed(delivering_attempts(attempts)):
-            collected.extend(_artifact_paths_from_payload(attempt))
+            collected.extend(
+                _novel_artifacts(_artifact_paths_from_payload(attempt), blocked)
+            )
             if collected:
                 break
-        if collected:
-            if expects_multiple_artifacts(criteria, instruction):
-                if len(collected) >= 2:
-                    return VerificationResult(
-                        True,
-                        f"verified {len(collected)} artifacts from attempts",
-                        "artifact",
-                    )
-            else:
-                return VerificationResult(
-                    True,
-                    f"artifact verified at {collected[0]}",
-                    "artifact",
-                )
+        if len(collected) >= required:
+            return _artifact_found(collected, source="attempts")
 
-        if expects_multiple_artifacts(criteria, instruction) and scope and scope.is_dir():
+        if widen_search and scope and scope.is_dir():
             extensions = {
                 Path(h).suffix.lower()
                 for h in path_hints_from_criteria(criteria)
@@ -258,9 +355,10 @@ def _verify_artifact(
                 found = _artifacts_in_scope(
                     search_root,
                     extensions=extensions,
-                    min_count=2,
+                    min_count=required,
+                    exclude=blocked,
                 )
-                if len(found) >= 2:
+                if len(found) >= required:
                     return VerificationResult(
                         True,
                         f"verified {len(found)} scoped artifacts under {search_root}",
@@ -269,24 +367,37 @@ def _verify_artifact(
 
     for hint in path_hints_from_criteria(criteria):
         resolved = _resolve_hint(hint, scope)
-        if resolved is not None and resolved.stat().st_size > 0:
-            return VerificationResult(
-                True, f"contract hint matched {resolved}", "artifact"
-            )
+        if resolved is None or resolved.stat().st_size <= 0:
+            continue
+        if resolved in blocked:
+            continue
+        return VerificationResult(
+            True, f"contract hint matched {resolved}", "artifact"
+        )
 
     if scope and scope.is_dir() and criteria:
         extensions = {
             Path(h).suffix.lower() for h in path_hints_from_criteria(criteria) if Path(h).suffix
         }
         if extensions:
-            for entry in scope.rglob("*"):
-                if entry.is_file() and entry.suffix.lower() in extensions:
-                    if entry.stat().st_size > 0:
-                        return VerificationResult(
-                            True,
-                            f"scoped artifact verified at {entry.resolve()}",
-                            "artifact",
-                        )
+            found = _artifacts_in_scope(
+                scope,
+                extensions=extensions,
+                min_count=required,
+                exclude=blocked,
+            )
+            if len(found) >= required:
+                if len(found) == 1:
+                    return VerificationResult(
+                        True,
+                        f"scoped artifact verified at {found[0]}",
+                        "artifact",
+                    )
+                return VerificationResult(
+                    True,
+                    f"verified {len(found)} scoped artifacts under {scope}",
+                    "artifact",
+                )
 
     return VerificationResult(
         False, "expected observable artifact not verified", "contract_unmet"
@@ -325,11 +436,21 @@ def verify_step_outcome(
     instruction: str | None,
     result: dict[str, Any],
     scope_dir: str | Path | None = None,
+    known_inputs: Sequence[str | Path] | None = None,
+    baseline_files: Sequence[str | Path] | set[Path] | None = None,
+    expected_artifact_count: int | None = None,
 ) -> VerificationResult:
     """Verify ``result`` against the step contract."""
     criteria = criteria_text(success_criteria)
     instruction_text = (instruction or "").strip()
     scope = Path(scope_dir).resolve() if scope_dir else None
+    required_count = expected_artifact_count or declared_artifact_count(
+        success_criteria
+    )
+    excluded = _excluded_artifact_paths(
+        known_inputs=known_inputs,
+        baseline_files=baseline_files,
+    )
     attempts = result.get("attempts")
     if isinstance(attempts, list):
         if any(a.get("ok") for a in attempts) and not delivering_attempts(attempts):
@@ -344,7 +465,12 @@ def verify_step_outcome(
     kind = goal_kind(criteria, instruction_text)
 
     artifact_check = _verify_artifact(
-        criteria, result, scope=scope, instruction=instruction_text
+        criteria,
+        result,
+        scope=scope,
+        instruction=instruction_text,
+        excluded=excluded,
+        required_count=required_count,
     )
     if artifact_check.verified:
         return artifact_check

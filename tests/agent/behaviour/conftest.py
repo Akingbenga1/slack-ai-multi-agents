@@ -163,6 +163,7 @@ class _ExecutorStubModel:
         messages: list[dict[str, str]],
         model_tier: str,
         tools: list[ToolSchema] | None = None,
+        **_kwargs: Any,
     ) -> LlmResult:
         last_msg = messages[-1]["content"] if messages else ""
         if "FAILED" in last_msg or "ERROR" in last_msg:

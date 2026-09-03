@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -15,8 +15,10 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.app.agent.base import AgentContext
+from api.app.agent.base import AgentContext, AgentResult
+from api.app.agent.executor import ExecutorAgent
 from api.app.agent.factory import get_agent
+from api.app.agent.workspace import RunWorkspace, WorkspaceInput
 from api.app.agent.llm import LlmResult, ToolCall, ToolSchema
 from api.app.agent.tools import lookup_tool
 from api.app.db.models import (
@@ -97,6 +99,7 @@ class ScriptedChatModel:
     def __init__(self, responses: list[LlmResult]) -> None:
         self._responses = list(responses)
         self._call_count = 0
+        self.last_tool_choice: str | None = None
 
     def complete(
         self,
@@ -105,8 +108,11 @@ class ScriptedChatModel:
         messages: list[dict[str, str]],
         model_tier: str,
         tools: list[ToolSchema] | None = None,
+        tool_choice: str | None = None,
+        **_kwargs: Any,
     ) -> LlmResult:
         self._call_count += 1
+        self.last_tool_choice = tool_choice
         if self._responses:
             return self._responses.pop(0)
         return LlmResult(
@@ -782,7 +788,6 @@ def test_execute_goal_verifies_artifact_when_result_reports_failure(
     db: Session, tenant_a: Tenant, tmp_path: Path
 ):
     target = tmp_path / "Combined.pdf"
-    target.write_bytes(b"%PDF-merged")
     plan = insert_agent_plan(
         db,
         tenant_id=str(tenant_a.id),
@@ -806,6 +811,7 @@ def test_execute_goal_verifies_artifact_when_result_reports_failure(
     db.commit()
 
     def fake_react(*, context, extra, db, instruction, success_criteria, step_arguments):
+        target.write_bytes(b"%PDF-merged")
         return {
             "ok": False,
             "error": "executor stopped without success",
@@ -883,3 +889,364 @@ def test_probe_only_execute_goal_fails_verification(db: Session, tenant_a: Tenan
     assert result.status == "failed"
     steps = list_agent_plan_steps(db, tenant_id=str(tenant_a.id), plan_id=plan.id)
     assert steps[0].status == "failed"
+
+
+def _finish_call(
+    *,
+    status: str = "success",
+    answer: str = "done",
+    artifacts: list[str] | None = None,
+) -> LlmResult:
+    """Helper: the model ending a step through the explicit finish action."""
+    return _make_tool_call(
+        "finish",
+        {"status": status, "answer": answer, "artifacts": artifacts or []},
+    )
+
+
+def test_empty_completion_does_not_consume_action_budget(
+    db: Session, tenant_a: Tenant, tmp_path
+):
+    from api.app.agent.executor import _run_english_goal_react
+    from api.app.settings import Settings
+
+    class RecordingModel:
+        def __init__(self) -> None:
+            self.tool_choices: list[str | None] = []
+            self.message_histories: list[list[dict[str, Any]]] = []
+            self._n = 0
+
+        def complete(self, **kwargs: Any) -> LlmResult:
+            self._n += 1
+            self.tool_choices.append(kwargs.get("tool_choice"))
+            self.message_histories.append(list(kwargs.get("messages") or []))
+            if self._n == 1:
+                return LlmResult(
+                    text="(empty model response)",
+                    model="stub",
+                    input_tokens=1,
+                    output_tokens=0,
+                    stop_reason="end_turn",
+                )
+            if self._n == 2:
+                return _make_tool_call(
+                    "run_python",
+                    {"script": "open('out.txt','w').write('ok')", "libs": []},
+                )
+            return _finish_call(answer="wrote out.txt", artifacts=["out.txt"])
+
+    def fake_python(arguments: dict[str, Any]) -> dict[str, Any]:
+        (tmp_path / "out.txt").write_text("ok", encoding="utf-8")
+        return {"ok": True, "stdout": "wrote out.txt", "error_class": "success"}
+
+    model = RecordingModel()
+    settings = Settings(
+        executor_uvx_max_attempts=1,
+        executor_empty_continuations=2,
+    )
+    result = _run_english_goal_react(
+        context=AgentContext(
+            client_id=str(tenant_a.id),
+            question="Write a short note",
+        ),
+        extra={
+            "chat_model": model,
+            "settings": settings,
+            "tools": {"run_python": fake_python},
+        },
+        db=db,
+        instruction="Write a text file named out.txt",
+        success_criteria="out.txt exists",
+        step_arguments={"cwd": str(tmp_path)},
+    )
+    assert result.get("ok") is True
+    # The empty round must not have spent the single available action.
+    assert result.get("attempt_count") == 1
+    assert model.tool_choices[0] == "required"
+    assistant_texts = [
+        msg.get("content") or ""
+        for history in model.message_histories
+        for msg in history
+        if msg.get("role") == "assistant" and isinstance(msg.get("content"), str)
+    ]
+    assert all("(empty model response)" not in text for text in assistant_texts)
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "ok"
+
+
+def test_identical_repeated_action_is_refused_without_running(
+    db: Session, tenant_a: Tenant, tmp_path
+):
+    """A stuck loop must change approach rather than re-run the same call."""
+    from api.app.agent.executor import _run_english_goal_react
+    from api.app.settings import Settings
+
+    calls: list[dict[str, Any]] = []
+    same_script = {"script": "raise SystemExit(1)", "libs": []}
+
+    def fake_python(arguments: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(arguments))
+        return {
+            "ok": False,
+            "error": "boom",
+            "error_class": "python_error",
+            "stderr": "RuntimeError: boom",
+        }
+
+    model = ScriptedChatModel(
+        [
+            _make_tool_call("run_python", dict(same_script)),
+            _make_tool_call("run_python", dict(same_script)),
+            _make_tool_call("run_python", dict(same_script)),
+            _make_tool_call("run_python", dict(same_script)),
+            _finish_call(status="blocked", answer="could not complete"),
+        ]
+    )
+    settings = Settings(
+        executor_uvx_max_attempts=8,
+        executor_empty_continuations=0,
+        executor_max_repeated_actions=2,
+        executor_reflect_after_failures=99,
+    )
+    result = _run_english_goal_react(
+        context=AgentContext(
+            client_id=str(tenant_a.id), question="Do the thing"
+        ),
+        extra={
+            "chat_model": model,
+            "settings": settings,
+            "tools": {"run_python": fake_python},
+        },
+        db=db,
+        instruction="Do the thing",
+        success_criteria="A file exists",
+        step_arguments={"cwd": str(tmp_path)},
+    )
+    assert result.get("ok") is False
+    # Executed twice (the repeat allowance), then refused without running.
+    assert len(calls) == 2
+    refused = [a for a in result["attempts"] if a.get("refused")]
+    assert refused and refused[0]["error_class"] == "refused"
+
+
+def test_finish_claim_without_artifact_is_not_success(
+    db: Session, tenant_a: Tenant, tmp_path
+):
+    """A finish claim is adjudicated, not trusted."""
+    from api.app.agent.executor import _run_english_goal_react
+    from api.app.settings import Settings
+
+    def fake_python(arguments: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "stdout": "pretended to write", "error_class": "success"}
+
+    model = ScriptedChatModel(
+        [
+            _make_tool_call("run_python", {"script": "pass", "libs": []}),
+            _finish_call(answer="created it", artifacts=["missing.pdf"]),
+        ]
+    )
+    settings = Settings(executor_uvx_max_attempts=4, executor_empty_continuations=0)
+    result = _run_english_goal_react(
+        context=AgentContext(client_id=str(tenant_a.id), question="Make a PDF"),
+        extra={
+            "chat_model": model,
+            "settings": settings,
+            "tools": {"run_python": fake_python},
+        },
+        db=db,
+        instruction="Create report.pdf",
+        success_criteria="report.pdf exists",
+        step_arguments={"cwd": str(tmp_path)},
+    )
+    assert result.get("missing_artifacts") == ["missing.pdf"]
+    assert "not found in the workspace" in str(result.get("error"))
+
+
+def test_react_transcript_pairs_every_action_with_an_observation(
+    db: Session, tenant_a: Tenant, tmp_path
+):
+    """Provider tool-calling requires one observation per requested action."""
+    from api.app.agent.executor import _run_english_goal_react
+    from api.app.settings import Settings
+
+    histories: list[list[dict[str, Any]]] = []
+
+    class Recorder:
+        def __init__(self) -> None:
+            self._n = 0
+
+        def complete(self, **kwargs: Any) -> LlmResult:
+            histories.append(list(kwargs.get("messages") or []))
+            self._n += 1
+            if self._n == 1:
+                return _make_tool_call(
+                    "run_python", {"script": "print(1)", "libs": []}
+                )
+            return _finish_call(answer="all good")
+
+    def fake_python(arguments: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "stdout": "1", "error_class": "success"}
+
+    _run_english_goal_react(
+        context=AgentContext(client_id=str(tenant_a.id), question="Compute"),
+        extra={
+            "chat_model": Recorder(),
+            "settings": Settings(executor_uvx_max_attempts=4),
+            "tools": {"run_python": fake_python},
+        },
+        db=db,
+        instruction="Print one",
+        success_criteria="Printed output",
+        step_arguments={"cwd": str(tmp_path)},
+    )
+    final = histories[-1]
+    requested = [
+        call.id
+        for msg in final
+        if msg.get("role") == "assistant"
+        for call in (msg.get("tool_calls") or [])
+    ]
+    answered = [
+        msg.get("tool_call_id") for msg in final if msg.get("role") == "tool"
+    ]
+    assert requested and requested == answered
+
+
+def test_produced_files_are_delivered_even_when_verification_failed(
+    tmp_path: Path,
+) -> None:
+    """A negative verdict must not hide artifacts the run actually produced."""
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    source = uploads / "input.pdf"
+    source.write_bytes(b"%PDF-source")
+
+    root = tmp_path / "ws"
+    (root / ".agent" / "scripts").mkdir(parents=True)
+    staged = root / "input.pdf"
+    staged.write_bytes(b"%PDF-source")
+    produced = root / "input_stamped.pdf"
+    produced.write_bytes(b"%PDF-stamped")
+
+    workspace = RunWorkspace(
+        root=root.resolve(),
+        inputs=(
+            WorkspaceInput(
+                name="input.pdf",
+                relative_path="input.pdf",
+                source_path=str(source),
+                size_bytes=staged.stat().st_size,
+            ),
+        ),
+    )
+    context = AgentContext(
+        client_id=str(uuid4()),
+        question="Stamp every page",
+        attachments=[{"filename": "input.pdf", "local_path": str(source)}],
+    )
+    extra: dict[str, Any] = {"workspace": workspace}
+    failed = AgentResult(
+        role="executor",
+        client_id=context.client_id,
+        status="failed",
+        message="expected observable artifact not verified",
+    )
+
+    result = ExecutorAgent()._deliver(context, extra, failed)
+
+    delivered = result.extra["delivered_files"]
+    assert len(delivered) == 1
+    assert (uploads / "input_stamped.pdf").is_file()
+    assert "input_stamped.pdf" in result.message
+
+    # Delivery is idempotent: a second terminal path must not duplicate files.
+    again = ExecutorAgent()._deliver(context, extra, failed)
+    assert again.extra["delivered_files"] == delivered
+    assert sorted(p.name for p in uploads.iterdir()) == [
+        "input.pdf",
+        "input_stamped.pdf",
+    ]
+
+
+def test_rejected_action_request_does_not_consume_action_budget(
+    db: Session, tenant_a: Tenant, tmp_path
+) -> None:
+    """A call rejected before execution must leave the attempt budget intact."""
+    from api.app.agent.executor import _run_english_goal_react
+    from api.app.settings import Settings
+
+    def fake_python(arguments: dict[str, Any]) -> dict[str, Any]:
+        if not str(arguments.get("script") or "").strip():
+            return {
+                "ok": False,
+                "tool": "run_python",
+                "error": "script is required",
+                "error_class": "invalid_action",
+                "retryable": True,
+            }
+        return {"ok": True, "stdout": "wrote the file", "error_class": "success"}
+
+    model = ScriptedChatModel(
+        [
+            _make_tool_call("run_python", {"libs": []}),
+            _make_tool_call("run_python", {"script": "print('ok')", "libs": []}),
+            _finish_call(answer="done"),
+        ]
+    )
+    # Exactly one attempt is allowed, so the malformed call must not spend it.
+    settings = Settings(executor_uvx_max_attempts=1, executor_empty_continuations=0)
+
+    result = _run_english_goal_react(
+        context=AgentContext(client_id=str(tenant_a.id), question="Write a file"),
+        extra={
+            "chat_model": model,
+            "settings": settings,
+            "tools": {"run_python": fake_python},
+        },
+        db=db,
+        instruction="Write a file",
+        success_criteria="Printed output",
+        step_arguments={"cwd": str(tmp_path)},
+    )
+
+    attempts = result.get("attempts") or []
+    classes = [a.get("error_class") for a in attempts]
+    assert "invalid_action" in classes
+    assert "refused" not in classes
+    assert any(a.get("ok") and a.get("tool") == "run_python" for a in attempts)
+    assert result.get("attempt_count") == 1
+
+
+def test_step_diagnostics_are_reported_on_the_outcome() -> None:
+    """Why a step ended must be readable from the run outcome, not only the DB."""
+    from api.app.agent.executor import _record_step_diagnostic
+
+    context = AgentContext(client_id=str(uuid4()), question="Shrink the PDF")
+    extra: dict[str, Any] = {}
+    _record_step_diagnostic(
+        extra,
+        step_index=0,
+        tool_name="execute_goal",
+        status="succeeded",
+        result={
+            "attempt_count": 12,
+            "stop_reason": "model call failed: Error code: 400",
+            "verification_method": "artifact",
+            "verification_reason": "artifact verified at out_try1.pdf",
+        },
+    )
+
+    result = ExecutorAgent()._deliver(
+        context,
+        extra,
+        AgentResult(
+            role="executor",
+            client_id=context.client_id,
+            status="succeeded",
+            message="done",
+        ),
+    )
+
+    diagnostic = result.extra["step_diagnostics"][0]
+    assert diagnostic["attempt_count"] == 12
+    assert diagnostic["stop_reason"].startswith("model call failed")
+    assert diagnostic["verification_method"] == "artifact"

@@ -7,11 +7,14 @@ from unittest.mock import MagicMock, patch
 from api.app.agent.uvx_invoke import (
     build_uvx_attempt_ledger,
     classify_uvx_tool_result,
+    collect_probe_contract,
     enrich_uvx_tool_result,
     goal_subcommand_hints,
     help_ladder_followup_args,
     is_duplicate_failed_attempt,
+    parse_flags_from_help,
     parse_subcommands_from_help,
+    pending_delivery_cli,
     preflight_uvx_tool_args,
     remediate_uvx_tool_args,
     run_uvx_with_recovery,
@@ -91,15 +94,188 @@ def test_is_duplicate_failed_attempt_matches_reconstructed_fingerprint() -> None
     )
 
 
-def test_parse_subcommands_from_help() -> None:
-    stdout = (
-        "Usage: pyexcel [OPTIONS] COMMAND [ARGS]...\n\n"
-        "Commands:\n"
-        "  diff       diff two excel files\n"
-        "  merge      Merge excel files into one\n"
-        "  split      Split a multi-sheet file into single ones\n"
+_CLICK_ROOT_HELP = (
+    "Usage: tool [OPTIONS] COMMAND [ARGS]...\n\n"
+    "Options:\n"
+    "  --help  Show this message and exit.\n\n"
+    "Commands:\n"
+    "  diff       diff two files\n"
+    "  merge      Merge files into one\n"
+    "  split      Split a file into parts\n"
+)
+
+_CLICK_SPLIT_HELP = (
+    "Usage: tool split [OPTIONS] PATH\n\n"
+    "Options:\n"
+    "  -o, --output PATH  Write output here.\n"
+    "  --help             Show this message and exit.\n"
+)
+
+
+def test_parse_flags_from_help() -> None:
+    assert parse_flags_from_help(_CLICK_SPLIT_HELP) == ["-o", "--output", "--help"]
+    assert parse_subcommands_from_help(_CLICK_ROOT_HELP) == ["diff", "merge", "split"]
+
+
+def test_preflight_blocks_unknown_subcommand_after_help() -> None:
+    prior = [
+        {
+            "ok": True,
+            "help_only": True,
+            "package": "tool",
+            "args_list": ["--help"],
+            "stdout": _CLICK_ROOT_HELP,
+        }
+    ]
+    _, err = preflight_uvx_tool_args(
+        {"package": "tool", "args_list": ["export", "input.csv"]},
+        prior_attempts=prior,
     )
-    assert parse_subcommands_from_help(stdout) == ["diff", "merge", "split"]
+    assert err is not None
+    assert err["code"] == "disallowed_invocation"
+    assert "Unknown subcommand" in err["error"]
+    assert "split" in err["allowed_subcommands"]
+
+
+def test_preflight_blocks_unknown_flag_after_subcommand_help() -> None:
+    prior = [
+        {
+            "ok": True,
+            "help_only": True,
+            "package": "tool",
+            "args_list": ["--help"],
+            "stdout": _CLICK_ROOT_HELP,
+        },
+        {
+            "ok": True,
+            "help_only": True,
+            "package": "tool",
+            "args_list": ["split", "--help"],
+            "stdout": _CLICK_SPLIT_HELP,
+            "probe_path": ["split"],
+        },
+    ]
+    _, err = preflight_uvx_tool_args(
+        {"package": "tool", "args_list": ["split", "input.csv", "--sheet", "1"]},
+        prior_attempts=prior,
+    )
+    assert err is not None
+    assert err["code"] == "disallowed_invocation"
+    assert "--sheet" in err["error"]
+    assert "--output" in err["allowed_flags"]
+
+
+def test_preflight_allows_known_subcommand_and_flag() -> None:
+    prior = [
+        {
+            "ok": True,
+            "help_only": True,
+            "package": "tool",
+            "args_list": ["--help"],
+            "stdout": _CLICK_ROOT_HELP,
+        },
+        {
+            "ok": True,
+            "help_only": True,
+            "package": "tool",
+            "args_list": ["split", "--help"],
+            "stdout": _CLICK_SPLIT_HELP,
+            "probe_path": ["split"],
+        },
+    ]
+    args, err = preflight_uvx_tool_args(
+        {"package": "tool", "args_list": ["split", "input.csv", "--output", "out.csv"]},
+        prior_attempts=prior,
+    )
+    assert err is None
+    assert args["args_list"][0] == "split"
+
+
+def test_preflight_skips_help_contract_without_prior_help() -> None:
+    _, err = preflight_uvx_tool_args(
+        {"package": "tool", "args_list": ["split", "--sheet", "1"]},
+    )
+    assert err is None
+
+
+def test_collect_probe_contract_merges_help() -> None:
+    contract = collect_probe_contract(
+        [
+            {
+                "ok": True,
+                "help_only": True,
+                "package": "tool",
+                "args_list": ["--help"],
+                "stdout": _CLICK_ROOT_HELP,
+            },
+            {
+                "ok": True,
+                "help_only": True,
+                "package": "tool",
+                "args_list": ["split", "--help"],
+                "stdout": _CLICK_SPLIT_HELP,
+            },
+        ],
+        package="tool",
+    )
+    assert "split" in contract["subcommands"]
+    assert "--output" in contract["flags_by_path"][("split",)]
+
+
+@patch("api.app.agent.uvx_invoke.run_uvx")
+def test_run_uvx_with_recovery_does_not_execute_unknown_flag(
+    mock_run_uvx: MagicMock,
+) -> None:
+    result = run_uvx_with_recovery(
+        {"package": "tool", "args_list": ["export", "in.csv"]},
+        prior_attempts=[
+            {
+                "ok": True,
+                "help_only": True,
+                "package": "tool",
+                "args_list": ["--help"],
+                "stdout": _CLICK_ROOT_HELP,
+            }
+        ],
+    )
+    assert result["ok"] is False
+    assert result["code"] == "disallowed_invocation"
+    mock_run_uvx.assert_not_called()
+
+
+def test_classify_disallowed_invocation() -> None:
+    insight = classify_uvx_tool_result(
+        {
+            "ok": False,
+            "code": "disallowed_invocation",
+            "allowed_subcommands": ["split"],
+            "allowed_flags": ["--output"],
+        }
+    )
+    assert insight["error_class"] == "blocked_contract"
+    assert insight["retryable"] is False
+    assert "split" in insight["suggested_next"]
+
+
+def test_build_attempt_ledger_includes_allowed_list() -> None:
+    ledger = build_uvx_attempt_ledger(
+        [
+            enrich_uvx_tool_result(
+                {
+                    "ok": True,
+                    "package": "tool",
+                    "args_list": ["--help"],
+                    "help_only": True,
+                    "stdout": _CLICK_ROOT_HELP,
+                    "allowed_subcommands": ["diff", "merge", "split"],
+                    "allowed_flags": ["--help"],
+                }
+            )
+        ],
+        max_attempts=4,
+    )
+    assert "Allowed from help" in ledger
+    assert "split" in ledger
 
 
 def test_goal_subcommand_hints_split() -> None:
@@ -214,10 +390,160 @@ def test_build_attempt_ledger_lists_failures() -> None:
                 }
             ),
         ],
-        max_attempts=8,
+        max_attempts=4,
     )
     assert "Attempt ledger" in ledger
     assert "FAILED/permanent" in ledger
     assert "OK/probe" in ledger
-    assert "Budget: 2/8" in ledger
-    assert "do not repeat" in ledger.lower()
+    assert "Budget: 2/4" in ledger
+    assert "Pending delivery" in ledger
+
+
+def _successful_probe(package: str = "tool") -> dict:
+    return enrich_uvx_tool_result(
+        {
+            "ok": True,
+            "package": package,
+            "args_list": ["--help"],
+            "help_only": True,
+            "stdout": "Usage: tool\n",
+        }
+    )
+
+
+def test_pending_delivery_after_successful_probe() -> None:
+    pending = pending_delivery_cli([_successful_probe("tool")])
+    assert pending is not None
+    assert pending["package"] == "tool"
+
+
+def test_pending_delivery_cleared_after_delivering_attempt() -> None:
+    pending = pending_delivery_cli(
+        [
+            _successful_probe("tool"),
+            {"ok": False, "package": "tool", "args_list": ["run", "in.png"], "stdout": ""},
+        ]
+    )
+    assert pending is None
+
+
+def test_preflight_blocks_second_help_probe_while_pending() -> None:
+    prior = [_successful_probe("tool")]
+    _, err = preflight_uvx_tool_args(
+        {"package": "tool", "help_only": True},
+        prior_attempts=prior,
+    )
+    assert err is not None
+    assert err["code"] == "pending_delivery"
+
+
+def test_preflight_blocks_other_package_while_pending() -> None:
+    prior = [_successful_probe("tool")]
+    _, err = preflight_uvx_tool_args(
+        {"package": "other", "help_only": True},
+        prior_attempts=prior,
+    )
+    assert err is not None
+    assert err["code"] == "pending_delivery"
+
+
+def test_preflight_allows_delivering_command_on_probed_cli() -> None:
+    prior = [_successful_probe("tool")]
+    args, err = preflight_uvx_tool_args(
+        {"package": "tool", "args_list": ["in.png", "out.png"]},
+        prior_attempts=prior,
+    )
+    assert err is None
+    assert args["package"] == "tool"
+
+
+def test_failed_probe_does_not_pin_cli() -> None:
+    prior = [
+        {
+            "ok": False,
+            "package": "missing",
+            "help_only": True,
+            "args_list": ["--help"],
+            "stderr": "not found",
+        }
+    ]
+    assert pending_delivery_cli(prior) is None
+    _, err = preflight_uvx_tool_args(
+        {"package": "other", "help_only": True},
+        prior_attempts=prior,
+    )
+    assert err is None
+
+
+def test_classify_pending_delivery() -> None:
+    insight = classify_uvx_tool_result(
+        {
+            "ok": False,
+            "code": "pending_delivery",
+            "error": "Help probe already succeeded for package='tool'.",
+        }
+    )
+    assert insight["error_class"] == "blocked_pending_delivery"
+    assert insight["retryable"] is True
+
+
+@patch("api.app.agent.uvx_invoke.run_uvx")
+def test_run_uvx_probes_help_before_first_delivering(mock_run_uvx: MagicMock) -> None:
+    help_ok = MagicMock(
+        ok=True,
+        exit_code=0,
+        stdout="Usage: tool\n",
+        stderr="",
+        package="tool",
+        args_list=["--help"],
+        cmd=[],
+        error=None,
+        output_file=None,
+        output_files=(),
+        with_packages=(),
+    )
+    help_ok.as_dict = lambda: {
+        "ok": True,
+        "exit_code": 0,
+        "stdout": "Usage: tool\n",
+        "stderr": "",
+        "package": "tool",
+        "args_list": ["--help"],
+        "cmd": [],
+        "help_only": True,
+    }
+    deliver_ok = MagicMock(
+        ok=True,
+        exit_code=0,
+        stdout="wrote out.png",
+        stderr="",
+        package="tool",
+        args_list=["in.png", "out.png"],
+        cmd=[],
+        error=None,
+        output_file="out.png",
+        output_files=("out.png",),
+        with_packages=(),
+    )
+    deliver_ok.as_dict = lambda: {
+        "ok": True,
+        "exit_code": 0,
+        "stdout": "wrote out.png",
+        "stderr": "",
+        "package": "tool",
+        "args_list": ["in.png", "out.png"],
+        "cmd": [],
+        "output_file": "out.png",
+        "output_files": ["out.png"],
+    }
+    mock_run_uvx.side_effect = [help_ok, deliver_ok]
+
+    result = run_uvx_with_recovery(
+        {"package": "tool", "args_list": ["in.png", "out.png"]},
+    )
+    assert result["ok"] is True
+    assert mock_run_uvx.call_count == 2
+    assert mock_run_uvx.call_args_list[0].kwargs["help_only"] is True
+    assert mock_run_uvx.call_args_list[1].kwargs["help_only"] is False
+    assert len(result.get("ladder_attempts") or []) == 1
+

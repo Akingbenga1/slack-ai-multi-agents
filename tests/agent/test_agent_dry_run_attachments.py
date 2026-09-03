@@ -256,6 +256,63 @@ def test_agent_dry_run_multipart_multiple_files_stores_and_attaches(
     assert captured["attachments"][1]["filename"] == "beta.pdf"
 
 
+def test_agent_dry_run_multipart_accepts_non_document_file_types(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Dry-run attachments are opaque executor payloads, not ingested docs."""
+    captured: dict = {}
+
+    def _fake_plan_and_execute(**kwargs):
+        captured.update(kwargs)
+        return AgentResult(
+            role="facade",
+            client_id=str(DEMO_TENANT_ID),
+            status="succeeded",
+            message="ok",
+            extra={"workflow": "image_processing", "plan_id": str(UUID(int=4))},
+        )
+
+    monkeypatch.setattr(
+        "api.app.agent.facade.plan_and_execute",
+        _fake_plan_and_execute,
+    )
+
+    res = client.post(
+        "/agent/dry-run",
+        headers={"Authorization": f"Bearer {_token()}"},
+        data={"question": "Combine the attached files into one image."},
+        files=[
+            ("file", ("a.png", b"\x89PNG\r\n\x1a\n alpha", "image/png")),
+            ("file", ("b.jpg", b"\xff\xd8\xff beta", "image/jpeg")),
+            ("file", ("c.bin", b"\x00\x01\x02 gamma", "application/octet-stream")),
+        ],
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert [item["filename"] for item in body["attachments"]] == [
+        "a.png",
+        "b.jpg",
+        "c.bin",
+    ]
+    for item in body["attachments"]:
+        assert Path(item["local_path"]).is_file()
+    assert len(captured["attachments"]) == 3
+
+
+def test_attachment_from_upload_bytes_accepts_binary_payload(settings: Settings):
+    att = attachment_from_upload_bytes(
+        client_id=str(DEMO_TENANT_ID),
+        filename="chart.png",
+        data=b"\x89PNG\r\n\x1a\n",
+        content_type="image/png",
+        settings=settings,
+    )
+    assert att["filename"] == "chart.png"
+    assert Path(att["local_path"]).is_file()
+    assert Path(att["local_path"]).read_bytes() == b"\x89PNG\r\n\x1a\n"
+
+
 def test_agent_dry_run_json_with_upload_ids_passes_all_attachments(
     client: TestClient,
     settings: Settings,

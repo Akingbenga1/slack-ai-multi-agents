@@ -83,6 +83,31 @@ def test_validate_extensions():
         validate_upload_filename(FileRole.SLACK_HISTORY, "guide.pdf")
 
 
+def test_agent_attachment_role_accepts_any_extension():
+    """Non-ingested payloads carry no extension policy."""
+    for name in ("chart.png", "clip.mp3", "bundle.tar.gz", "tool.exe", "README"):
+        assert validate_upload_filename(FileRole.AGENT_ATTACHMENT, name)
+
+
+def test_agent_attachment_role_still_sanitizes_filename():
+    """Dropping the allowlist must not drop path-traversal protection."""
+    safe = validate_upload_filename(
+        FileRole.AGENT_ATTACHMENT, "../../etc/passwd.png"
+    )
+    assert safe == "passwd.png"
+    assert "/" not in safe and "\\" not in safe and ".." not in safe
+
+
+def test_ingesting_roles_keep_their_allowlists():
+    """Loosening the agent role must not loosen parser-routed roles."""
+    with pytest.raises(ValueError):
+        validate_upload_filename(FileRole.DOCUMENT, "chart.png")
+    with pytest.raises(ValueError):
+        validate_upload_filename(FileRole.WORKFLOW, "chart.png")
+    with pytest.raises(ValueError):
+        validate_upload_filename(FileRole.SLACK_HISTORY, "chart.png")
+
+
 def test_store_upload_writes_file(upload_root: Path):
     stored = store_upload(
         upload_root=upload_root,

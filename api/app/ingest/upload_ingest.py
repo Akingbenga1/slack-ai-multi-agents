@@ -133,4 +133,4 @@ def ingest_upload(
             point_ids=result_m.point_ids,
         )
 
-    raise ValueError(f"Unknown file_role: {role}")
+    raise ValueError(f"file_role={role} has no ingest path")

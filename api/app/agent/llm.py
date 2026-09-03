@@ -28,6 +28,13 @@ from api.app.settings import Settings, get_settings
 
 logger = get_logger("api.agent.llm")
 
+# Role-named tool_choice values (adapters map these to provider fields).
+TOOL_CHOICE_AUTO = "auto"
+TOOL_CHOICE_REQUIRED = "required"
+TOOL_CHOICE_NONE = "none"
+
+EMPTY_COMPLETION_TEXT = "(empty model response)"
+
 
 def _log_complete_prompts(
     *,
@@ -59,6 +66,46 @@ class ToolSchema:
     parameters: dict[str, Any] = field(default_factory=dict)
 
 
+# Provider-neutral transcript roles. Callers build an append-only history of
+# these; adapters translate to each provider's tool-calling wire format.
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
+ROLE_TOOL = "tool"
+
+# Minimal turn used to hand the floor back to the model when a transcript
+# would otherwise end on an assistant turn. Carries no instruction of its own.
+_CONTINUATION_TURN = "Continue."
+
+
+def assistant_action_message(
+    text: str,
+    tool_calls: Sequence["ToolCall"],
+) -> dict[str, Any]:
+    """Assistant turn that requested one or more tool calls."""
+    return {
+        "role": ROLE_ASSISTANT,
+        "content": text or "",
+        "tool_calls": list(tool_calls or []),
+    }
+
+
+def tool_observation_message(
+    *,
+    tool_call_id: str,
+    name: str,
+    content: str,
+    is_error: bool = False,
+) -> dict[str, Any]:
+    """Observation turn answering exactly one prior tool call."""
+    return {
+        "role": ROLE_TOOL,
+        "tool_call_id": tool_call_id,
+        "name": name,
+        "content": content,
+        "is_error": bool(is_error),
+    }
+
+
 @dataclass(frozen=True)
 class ToolCall:
     """One model-requested tool invocation. Adapters never execute this."""
@@ -75,6 +122,7 @@ class LlmResult:
     input_tokens: int
     output_tokens: int
     tool_calls: tuple[ToolCall, ...] = ()
+    stop_reason: str | None = None
 
     @property
     def total_tokens(self) -> int:
@@ -83,6 +131,13 @@ class LlmResult:
     @property
     def has_tool_calls(self) -> bool:
         return len(self.tool_calls) > 0
+
+    @property
+    def is_empty(self) -> bool:
+        if self.has_tool_calls:
+            return False
+        text = (self.text or "").strip()
+        return not text or text == EMPTY_COMPLETION_TEXT
 
 
 class ChatModel(Protocol):
@@ -94,6 +149,7 @@ class ChatModel(Protocol):
         model_tier: ModelTier,
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
+        tool_choice: str | None = None,
     ) -> LlmResult: ...
 
 
@@ -125,16 +181,18 @@ class StubChatModel:
         model_tier: ModelTier,
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
+        tool_choice: str | None = None,
     ) -> LlmResult:
         _log_complete_prompts(
             system=system, messages=messages, model_tier=model_tier
         )
         _ = max_tokens
+        _ = tool_choice
         _ = system
         user = ""
         for m in reversed(messages):
             if m.get("role") == "user":
-                user = m.get("content") or ""
+                user = message_content(m)
                 break
         evidence_note = ""
         if "Evidence:" in user:
@@ -205,6 +263,7 @@ class AnthropicChatModel:
         model_tier: ModelTier,
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
+        tool_choice: str | None = None,
     ) -> LlmResult:
         _log_complete_prompts(
             system=system, messages=messages, model_tier=model_tier
@@ -218,24 +277,27 @@ class AnthropicChatModel:
                 else self._config.max_tokens
             ),
             "system": system,
-            "messages": [
-                {"role": m["role"], "content": m["content"]} for m in messages
-            ],
+            "messages": _to_anthropic_messages(messages),
         }
         mapped = _to_anthropic_tools(_bound_tools(tools))
         if mapped:
             kwargs["tools"] = mapped
+            mapped_choice = _to_anthropic_tool_choice(tool_choice)
+            if mapped_choice is not None:
+                kwargs["tool_choice"] = mapped_choice
         resp = self._client.messages.create(**kwargs)
         text, calls = _from_anthropic_content(getattr(resp, "content", None))
         usage = getattr(resp, "usage", None)
         in_tok = int(getattr(usage, "input_tokens", 0) or 0)
         out_tok = int(getattr(usage, "output_tokens", 0) or 0)
+        stop_reason = getattr(resp, "stop_reason", None)
         return LlmResult(
             text=text,
             model=model,
             input_tokens=in_tok,
             output_tokens=out_tok,
             tool_calls=calls,
+            stop_reason=str(stop_reason) if stop_reason else None,
         )
 
 
@@ -279,6 +341,7 @@ class OpenAICompatChatModel:
         model_tier: ModelTier,
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
+        tool_choice: str | None = None,
     ) -> LlmResult:
         _log_complete_prompts(
             system=system, messages=messages, model_tier=model_tier
@@ -286,14 +349,7 @@ class OpenAICompatChatModel:
         model = self._model_id(model_tier)
         payload: dict[str, Any] = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                *[
-                    {"role": m["role"], "content": m["content"]}
-                    for m in messages
-                    if m.get("role") in ("user", "assistant", "system")
-                ],
-            ],
+            "messages": _to_openai_messages(system, messages),
             "max_tokens": int(
                 max_tokens
                 if max_tokens is not None
@@ -304,6 +360,9 @@ class OpenAICompatChatModel:
         mapped = _to_openai_tools(_bound_tools(tools))
         if mapped:
             payload["tools"] = mapped
+            mapped_choice = _to_openai_tool_choice(tool_choice)
+            if mapped_choice is not None:
+                payload["tool_choice"] = mapped_choice
         url = f"{self.base_url}/v1/chat/completions"
         headers = self._request_headers()
 
@@ -337,7 +396,7 @@ class OpenAICompatChatModel:
         text = _openai_compat_text(data)
         calls = _openai_compat_tool_calls(data)
         if not text and not calls:
-            text = "(empty model response)"
+            text = EMPTY_COMPLETION_TEXT
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         in_tok = int(usage.get("prompt_tokens") or 0)
         out_tok = int(usage.get("completion_tokens") or 0)
@@ -348,6 +407,7 @@ class OpenAICompatChatModel:
             input_tokens=in_tok,
             output_tokens=out_tok,
             tool_calls=calls,
+            stop_reason=_openai_compat_stop_reason(data),
         )
 
 
@@ -378,6 +438,126 @@ def _json_object_schema(parameters: dict[str, Any] | None) -> dict[str, Any]:
     return {"type": "object", "properties": {}}
 
 
+def _message_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
+    raw = message.get("tool_calls") or []
+    calls: list[ToolCall] = []
+    for item in raw:
+        if isinstance(item, ToolCall):
+            calls.append(item)
+        elif isinstance(item, dict):
+            calls.append(
+                ToolCall(
+                    name=str(item.get("name") or ""),
+                    arguments=item.get("arguments") or {},
+                    id=str(item.get("id") or ""),
+                )
+            )
+    return calls
+
+
+def _to_anthropic_messages(
+    messages: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Map the neutral transcript onto Anthropic content blocks.
+
+    Consecutive tool observations merge into a single user turn because the
+    Messages API expects all ``tool_result`` blocks for one assistant turn to
+    arrive together.
+
+    A trailing assistant turn is read as a reply to be continued (prefill),
+    which some models reject. The neutral transcript may legitimately end on
+    an assistant turn, so conformance is settled here rather than trusted to
+    every caller.
+    """
+    out: list[dict[str, Any]] = []
+    pending_results: list[dict[str, Any]] = []
+
+    def _flush() -> None:
+        if pending_results:
+            out.append({"role": "user", "content": list(pending_results)})
+            pending_results.clear()
+
+    for message in messages or []:
+        role = str(message.get("role") or "").strip()
+        if role == ROLE_TOOL:
+            block: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": str(message.get("tool_call_id") or ""),
+                "content": str(message.get("content") or ""),
+            }
+            if message.get("is_error"):
+                block["is_error"] = True
+            pending_results.append(block)
+            continue
+
+        _flush()
+        calls = _message_tool_calls(message)
+        if role == ROLE_ASSISTANT and calls:
+            blocks: list[dict[str, Any]] = []
+            text = str(message.get("content") or "").strip()
+            if text:
+                blocks.append({"type": "text", "text": text})
+            for call in calls:
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": call.arguments or {},
+                    }
+                )
+            out.append({"role": "assistant", "content": blocks})
+            continue
+        out.append({"role": role or "user", "content": message.get("content") or ""})
+
+    _flush()
+    if out and str(out[-1].get("role") or "") == ROLE_ASSISTANT:
+        out.append({"role": ROLE_USER, "content": _CONTINUATION_TURN})
+    return out
+
+
+def _to_openai_messages(
+    system: str,
+    messages: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Map the neutral transcript onto OpenAI chat-completions turns."""
+    out: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    for message in messages or []:
+        role = str(message.get("role") or "").strip()
+        if role == ROLE_TOOL:
+            out.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": str(message.get("tool_call_id") or ""),
+                    "content": str(message.get("content") or ""),
+                }
+            )
+            continue
+        calls = _message_tool_calls(message)
+        if role == ROLE_ASSISTANT and calls:
+            out.append(
+                {
+                    "role": "assistant",
+                    "content": str(message.get("content") or "") or None,
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": json.dumps(call.arguments or {}),
+                            },
+                        }
+                        for call in calls
+                    ],
+                }
+            )
+            continue
+        if role in (ROLE_USER, ROLE_ASSISTANT, "system"):
+            out.append({"role": role, "content": message.get("content") or ""})
+    return out
+
+
 def _to_anthropic_tools(tools: list[ToolSchema]) -> list[dict[str, Any]]:
     return [
         {
@@ -387,6 +567,24 @@ def _to_anthropic_tools(tools: list[ToolSchema]) -> list[dict[str, Any]]:
         }
         for t in tools
     ]
+
+
+def _to_anthropic_tool_choice(tool_choice: str | None) -> dict[str, str] | None:
+    """Map role-named tool_choice to Anthropic Messages ``tool_choice``."""
+    choice = (tool_choice or "").strip().lower()
+    if choice == TOOL_CHOICE_REQUIRED:
+        return {"type": "any"}
+    if choice == TOOL_CHOICE_NONE:
+        return {"type": "none"}
+    return None
+
+
+def _to_openai_tool_choice(tool_choice: str | None) -> str | None:
+    """Map role-named tool_choice to OpenAI-compat ``tool_choice``."""
+    choice = (tool_choice or "").strip().lower()
+    if choice in {TOOL_CHOICE_REQUIRED, TOOL_CHOICE_NONE}:
+        return choice
+    return None
 
 
 def _to_openai_tools(tools: list[ToolSchema]) -> list[dict[str, Any]]:
@@ -443,7 +641,7 @@ def _from_anthropic_content(content: Any) -> tuple[str, tuple[ToolCall, ...]]:
             parts.append(str(text))
     joined = "\n".join(parts).strip()
     if not joined and not calls:
-        joined = "(empty model response)"
+        joined = EMPTY_COMPLETION_TEXT
     return joined, tuple(calls)
 
 
@@ -489,6 +687,17 @@ def _openai_compat_tool_calls(data: dict[str, Any]) -> tuple[ToolCall, ...]:
             )
         )
     return tuple(calls)
+
+
+def _openai_compat_stop_reason(data: dict[str, Any]) -> str | None:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0]
+    if not isinstance(first, dict):
+        return None
+    reason = first.get("finish_reason")
+    return str(reason) if reason else None
 
 
 def _openai_compat_text(data: dict[str, Any]) -> str:

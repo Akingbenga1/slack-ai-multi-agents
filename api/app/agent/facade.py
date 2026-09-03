@@ -109,6 +109,11 @@ def plan_and_execute(
             "run_id": exec_result.extra.get("run_id"),
             "phase": "executor",
             "workflow": workflow,
+            **{
+                key: exec_result.extra[key]
+                for key in ("step_diagnostics", "delivered_files")
+                if key in exec_result.extra
+            },
             **_trace_from_orch(),
         },
     )

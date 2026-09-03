@@ -74,7 +74,8 @@ class _ExecutorStubModel:
         self._done = False
 
     def complete(self, *, system: str, messages: list[dict[str, str]],
-                 model_tier: str, tools: list[ToolSchema] | None = None) -> LlmResult:
+                 model_tier: str, tools: list[ToolSchema] | None = None,
+                 **_kwargs: Any) -> LlmResult:
         last_msg = messages[-1]["content"] if messages else ""
         if "FAILED" in last_msg or "ERROR" in last_msg:
             self._done = True

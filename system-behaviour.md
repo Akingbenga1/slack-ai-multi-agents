@@ -4,172 +4,270 @@ Plain-English requests a typical office worker might make in a day.
 Each scenario should be achievable by the agent through English plan steps and real CLI execution (`uvx` or built-in tools).  
 Scenarios span common file types and everyday tasks: reading, converting, summarizing, organizing, comparing, and producing outputs.
 
-**5 PDF-focused** scenarios and **20** centred on other everyday office formats (Word, Excel, PowerPoint, images, audio, email, and more).
+**7 PDF-focused** scenarios and **23** centred on other everyday office formats (Word, Excel, PowerPoint, images, audio, email, and more).
+
+The previous set of scenarios is preserved in `system-behaviour-old.md`; the operations below are deliberately distinct from those.
 
 ---
 
-## 1. Summarize a PDF report for email
 
-**User request:** “Summarize this quarterly report PDF into bullet points I can paste into an email.”
 
----
+## 1. Split a long PDF into one file per section
 
-## 2. Clean up a Word memo with tracked changes
-
-**User request:** “Accept the sensible edits in this Word memo and give me a clean final version without track changes or comments.”
+**User request:** “This 60-page handbook PDF has bookmarks for each section — split it into a separate PDF per section, named after the section.”
 
 ---
 
-## 3. Merge multiple PDFs into one file
 
-**User request:** “Combine these three signed contract PDFs into a single PDF in the same order.”
 
----
+## 2. Stamp page numbers and a confidentiality footer on a PDF
 
-## 4. Extract tables from a PDF invoice
-
-**User request:** “Pull the line items and totals from this PDF invoice into a spreadsheet.”
+**User request:** “Add ‘Page X of Y’ and the word ‘Confidential’ to the bottom of every page of this PDF.”
 
 ---
 
-## 5. Clean and deduplicate a CSV contact list
 
-**User request:** “Remove duplicate email addresses from this contact list and sort it alphabetically by last name.”
 
----
+## 3. Fill in a PDF application form and flatten it
 
-## 6. Filter an Excel expense sheet by date range
-
-**User request:** “From this expenses spreadsheet, keep only rows between 1 March and 31 March and show the total by category.”
+**User request:** “Use the details in this spreadsheet row to fill in the attached PDF form, then flatten it so the fields can’t be edited.”
 
 ---
 
-## 7. Merge three regional CSV sales exports
 
-**User request:** “Combine these three regional sales CSV files into one master spreadsheet sorted by date and customer.”
 
----
+## 4. Fix rotation and drop blank pages in a scan
 
-## 8. Summarize meeting notes and action items
-
-**User request:** “Read these meeting notes and give me a short summary plus a numbered list of action items with owners.”
+**User request:** “Some pages in this scanned PDF are sideways and a few are completely blank — straighten the sideways ones and remove the blanks.”
 
 ---
 
-## 9. Compare two policy PDFs and highlight differences
 
-**User request:** “Compare last year’s policy PDF with this year’s version and list what changed in plain English.”
 
----
+## 5. Shrink an oversized PDF to fit an upload limit
 
-## 10. Extract text from a scanned PDF (OCR)
-
-**User request:** “This PDF is a scan — extract the text so I can search and copy it.”
+**User request:** “This PDF is 42 MB but the portal only accepts 10 MB — make it smaller while keeping the text readable.”
 
 ---
 
-## 11. Compress images for a presentation handout
 
-**User request:** “These photos are too large for email — resize them to a reasonable width and compress them without changing the filenames.”
 
----
+## 6. Extract all embedded images from a PDF
 
-## 12. Combine screenshots into a shareable image pack
-
-**User request:** “Take these four PNG screenshots and package them as a ZIP with consistent filenames so I can attach them to an email.”
+**User request:** “Pull every photo and diagram out of this PDF and save them as separate image files.”
 
 ---
 
-## 13. Extract a slide outline from PowerPoint
 
-**User request:** “Pull just the slide titles and main bullet points from this PowerPoint into a plain text outline I can share.”
 
----
+## 7. Reorder and delete pages in a PDF
 
-## 14. Pull speaker notes from a presentation
-
-**User request:** “Extract the speaker notes from this PowerPoint into a Word document.”
+**User request:** “Remove pages 3 and 7 from this PDF and move the appendix at the back to the front.”
 
 ---
 
-## 15. Unzip an archive and list what is inside
 
-**User request:** “Unzip this folder and give me a list of every file with its size and type.”
 
----
+## 8. Reformat a Word document to house styles
 
-## 16. Rename receipt photos in batch
-
-**User request:** “Rename all these receipt photos from `IMG_*.jpg` to `2026-03-Receipt-01.jpg`, `2026-03-Receipt-02.jpg`, and so on in date order.”
+**User request:** “Reformat this Word document to use our heading styles, Arial 11 body text, and 1.15 line spacing throughout.”
 
 ---
 
-## 17. Validate and pretty-print a JSON config file
 
-**User request:** “Check whether this JSON settings file is valid and rewrite it in a readable indented format.”
 
----
+## 9. Collect all Word comments into a review log
 
-## 18. Convert Markdown release notes to HTML
-
-**User request:** “Convert these release notes from Markdown to a clean HTML page I can paste into our intranet.”
+**User request:** “Pull every comment out of this Word document into a table showing who wrote it, which paragraph it points at, and what it says.”
 
 ---
 
-## 19. Write an executive summary from a report and spreadsheet
 
-**User request:** “Using the attached Word report and Excel numbers, draft a one-page executive summary document I can circulate.”
 
----
+## 10. Replace an old company name across many documents
 
-## 20. Redact sensitive information in a Word file before sharing
-
-**User request:** “Before I send this Word document externally, remove or mask all phone numbers and email addresses.”
+**User request:** “We rebranded — replace the old company name with the new one across all these Word files and tell me how many changes you made per file.”
 
 ---
 
-## 21. Split an Excel workbook into separate files by sheet
 
-**User request:** “Split this Excel workbook so each worksheet becomes its own file named after the tab.”
 
----
+## 11. Split a long Word document by heading
 
-## 22. Generate personalised letters from a CSV list
-
-**User request:** “For each row in this CSV, fill the attached Word letter template and save one completed document per person.”
+**User request:** “Break this long Word document into one file per top-level heading, named after that heading.”
 
 ---
 
-## 23. Build a mailing list from vCards and a spreadsheet
 
-**User request:** “From these vCard files and the contact spreadsheet, produce one deduplicated CSV with name, company, email, and phone.”
 
----
+## 12. Check length and readability before publishing
 
-## 24. Transcribe and summarize a recorded meeting
-
-**User request:** “Transcribe this meeting audio and give me a summary with decisions and follow-ups.”
+**User request:** “Give me the word count per section of this document and flag any paragraph longer than 60 words or written at too high a reading level.”
 
 ---
 
-## 25. Produce a daily briefing from inbox exports
 
-**User request:** “From these exported `.eml` messages and the attached calendar `.ics` file, write a morning briefing: today’s meetings, urgent threads, and open tasks.”
+
+## 13. Cross-tabulate a flat transaction list
+
+**User request:** “Turn this flat list of transactions into a summary table with months down the side and regions across the top.”
 
 ---
+
+
+
+## 14. Reconcile a bank export against the ledger
+
+**User request:** “Compare this bank export with our ledger spreadsheet and list the transactions that appear in one but not the other.”
+
+---
+
+
+
+## 15. Add calculated VAT and running-total columns
+
+**User request:** “Add a VAT column at 20% and a running total to this spreadsheet, and put the grand total at the bottom.”
+
+---
+
+
+
+## 16. Flag data-quality problems in a spreadsheet
+
+**User request:** “Check this spreadsheet for missing required fields, invalid dates, and negative quantities, and give me a list of the rows that need fixing.”
+
+---
+
+
+
+## 17. Convert a spreadsheet to JSON for a developer
+
+**User request:** “Our developer needs this product spreadsheet as JSON — one object per row using the column headers as keys.”
+
+---
+
+
+
+## 18. Chart monthly revenue as an image
+
+**User request:** “Make a bar chart of monthly revenue from this spreadsheet and save it as a PNG I can drop into a slide.”
+
+---
+
+
+
+## 19. Build a slide deck from a written outline
+
+**User request:** “Turn this outline document into a PowerPoint with one slide per heading and the bullets underneath each.”
+
+---
+
+
+
+## 20. Update branding and dates across every slide
+
+**User request:** “Swap the old logo for the new one on all slides in this deck and change the footer date to March 2026.”
+
+---
+
+
+
+## 21. Export a deck as a printable handout
+
+**User request:** “Turn this presentation into a handout PDF with four slides per page and room for notes.”
+
+---
+
+
+
+## 22. Convert phone photos to a usable format
+
+**User request:** “These HEIC photos from my phone won’t open on my colleague’s PC — convert them all to JPG.”
+
+---
+
+
+
+## 23. Watermark images before sending them out
+
+**User request:** “Add a faint ‘Draft — Not For Distribution’ watermark across these product images before I share them.”
+
+---
+
+
+
+## 24. Strip hidden metadata from photos
+
+**User request:** “Before these photos go on our website, remove the GPS location and camera details embedded in them.”
+
+---
+
+
+
+## 25. Find duplicate files across a folder tree
+
+**User request:** “This shared folder has grown out of control — find files that are genuine duplicates of each other and show me which copies I can delete.”
+
+---
+
+
+
+## 26. Sort a messy downloads folder
+
+**User request:** “Sort everything in this folder into subfolders by file type and by the month it was created.”
+
+---
+
+
+
+## 27. Convert an XML export to a spreadsheet
+
+**User request:** “Our old system exports XML — flatten this export into a CSV with one row per record.”
+
+---
+
+
+
+## 28. Turn a saved web page into clean text
+
+**User request:** “I saved this intranet page as HTML — strip out the navigation and styling and give me just the content as Markdown.”
+
+---
+
+
+
+## 29. Pull the audio out of a recorded call and split it
+
+**User request:** “Extract the audio from this meeting recording and split it into 15-minute segments so I can share the relevant part.”
+
+---
+
+
+
+## 30. Build a calendar file from a schedule spreadsheet
+
+**User request:** “From this spreadsheet of training dates, create a calendar file I can import into Outlook with one event per row.”
+
+---
+
+
 
 ## Coverage matrix (quick reference)
 
-| Category            | Scenarios        |
-|---------------------|------------------|
-| PDF                 | 1, 3, 4, 9, 10   |
-| Word / text         | 2, 8, 14, 19, 20, 22 |
-| Excel / CSV         | 5, 6, 7, 21, 23  |
-| PowerPoint          | 13, 14           |
-| Images              | 11, 12, 16       |
-| Archives            | 12, 15           |
-| Structured data     | 17, 23           |
-| Markdown / HTML     | 18               |
-| Audio               | 24               |
-| Email / calendar    | 25               |
-| Multi-file workflows| 7, 19, 22, 23, 25 |
+
+| Category             | Scenarios                      |
+| -------------------- | ------------------------------ |
+| PDF                  | 1, 2, 3, 4, 5, 6, 7            |
+| Word / text          | 8, 9, 10, 11, 12, 19           |
+| Excel / CSV          | 13, 14, 15, 16, 17, 18, 27, 30 |
+| PowerPoint           | 19, 20, 21                     |
+| Images               | 6, 18, 22, 23, 24              |
+| Files / folders      | 25, 26                         |
+| Structured data      | 17, 27                         |
+| Markdown / HTML      | 28                             |
+| Audio / video        | 29                             |
+| Email / calendar     | 30                             |
+| Batch across files   | 10, 22, 23, 24, 25, 26         |
+| Multi-file workflows | 3, 10, 19, 20, 25              |
+
+
