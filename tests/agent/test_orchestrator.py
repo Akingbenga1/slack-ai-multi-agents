@@ -23,6 +23,7 @@ from api.app.agent.orchestrator import (
     _PLAN_SYSTEM,
     _planning_user_message,
     parse_plan_steps,
+    recover_execute_goal_steps,
 )
 from api.app.agent.guardrails import (
     PLAN_SAFETY_REFUSAL,
@@ -205,6 +206,111 @@ def test_parse_plan_steps_from_json_object():
     )
     assert steps[0]["tool_name"] == "fetch_channel_history"
     assert steps[0]["arguments"]["ch"] == "#x"
+
+
+def test_parse_plan_merges_step_level_relations_into_criteria():
+    steps = parse_plan_steps(
+        json.dumps(
+            {
+                "workflow": "qa",
+                "steps": [
+                    {
+                        "tool_name": "execute_goal",
+                        "arguments": {"instruction": "Produce new outputs from the inputs."},
+                        "success_criteria": "new outputs exist",
+                        "relations": [
+                            {"type": "produced"},
+                            {"type": "novel_vs_inputs"},
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    assert steps[0]["success_criteria"]["text"] == "new outputs exist"
+    assert steps[0]["success_criteria"]["relations"][1]["type"] == "novel_vs_inputs"
+
+
+def test_parse_plan_accepts_relation_object_and_english_criteria():
+    steps = parse_plan_steps(
+        json.dumps(
+            {
+                "workflow": "qa",
+                "steps": [
+                    {
+                        "tool_name": "execute_goal",
+                        "arguments": {"instruction": "Produce the requested outputs."},
+                        "success_criteria": {
+                            "text": "outputs exist and differ from inputs",
+                            "relations": [
+                                {"type": "produced"},
+                                {"type": "novel_vs_inputs"},
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    assert len(steps) == 1
+    assert steps[0]["tool_name"] == "execute_goal"
+    assert steps[0]["arguments"]["instruction"] == "Produce the requested outputs."
+    assert steps[0]["success_criteria"]["relations"][1]["type"] == "novel_vs_inputs"
+
+
+def test_parse_plan_recovers_steps_from_trailing_text_and_commas():
+    raw = (
+        '{"workflow": "qa", "steps": ['
+        '{"tool_name": "execute_goal", '
+        '"arguments": {"instruction": "Convert the attachment"}, '
+        '"success_criteria": "file delivered",}]}'
+        "\nThanks."
+    )
+    steps = parse_plan_steps(raw)
+    assert len(steps) == 1
+    assert steps[0]["arguments"]["instruction"] == "Convert the attachment"
+
+
+def test_recover_execute_goal_from_broken_json_not_explicit_empty():
+    recovered = recover_execute_goal_steps(
+        '{"workflow": "qa", "steps": [{"tool_name": "execute_goal",',
+        "Convert the attached table into a new spreadsheet",
+        has_attachments=True,
+    )
+    assert len(recovered) == 1
+    assert recovered[0]["tool_name"] == "execute_goal"
+    assert "spreadsheet" in recovered[0]["arguments"]["instruction"]
+    assert recovered[0]["requires_attachment"] is True
+
+
+def test_recover_skips_explicit_empty_steps_and_prose():
+    assert recover_execute_goal_steps(
+        '{"workflow": "qa", "steps": []}',
+        "Delete every stored file",
+    ) == []
+    assert recover_execute_goal_steps(
+        "[stub:capable] Grounded reply (offline).",
+        "Convert the attached table into a new spreadsheet",
+    ) == []
+
+
+def test_parse_plan_instruction_wins_over_note_text():
+    steps = parse_plan_steps(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "instruction": "Create a new spreadsheet from the table",
+                        "text": "outputs exist",
+                        "success_criteria": {"relations": [{"type": "produced"}]},
+                    }
+                ]
+            }
+        )
+    )
+    assert len(steps) == 1
+    assert steps[0]["tool_name"] == "execute_goal"
+    assert "spreadsheet" in steps[0]["arguments"]["instruction"]
 
 
 def test_parse_plan_accepts_advice_steps_without_catalog_tool():
@@ -589,7 +695,12 @@ def test_plan_system_requires_english_execute_goal_steps():
 
 def test_plan_system_single_outcome_for_attached_transformations():
     assert "one execute_goal step" in _PLAN_SYSTEM
+    assert "relations" in _PLAN_SYSTEM
+    assert "novel_vs_inputs" in _PLAN_SYSTEM
     assert "Do not add separate validation" in _PLAN_SYSTEM
+    assert "A short English string is valid" in _PLAN_SYSTEM
+
+
 def test_find_destructive_plan_violations_detects_delete_tool():
     violations = find_destructive_plan_violations(
         [{"tool_name": "delete_file", "arguments": {"path": "/tmp/a.txt"}}]

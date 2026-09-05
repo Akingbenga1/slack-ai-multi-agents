@@ -11,6 +11,7 @@ from api.app.agent.outcome_verifier import (
     is_probe_attempt,
     verify_step_outcome,
 )
+from tests.agent.png_fixture import write_solid_png
 
 
 def test_probe_attempt_rejected_even_when_ok() -> None:
@@ -212,7 +213,7 @@ def test_new_artifact_verified_when_sources_already_in_scope(tmp_path: Path) -> 
         baseline_files=baseline,
     )
     assert result.verified is True
-    assert result.method == "artifact"
+    assert result.method in {"artifact", "relations"}
 
 
 @pytest.mark.parametrize(
@@ -244,7 +245,7 @@ def test_distribution_wording_does_not_require_several_files(
         baseline_files={source.resolve()},
     )
     assert result.verified is True
-    assert result.method == "artifact"
+    assert result.method in {"artifact", "relations"}
 
 
 def test_declared_artifact_count_is_binding(tmp_path: Path) -> None:
@@ -259,6 +260,34 @@ def test_declared_artifact_count_is_binding(tmp_path: Path) -> None:
     )
     assert result.verified is False
     assert result.method == "contract_unmet"
+
+
+def test_size_ceiling_marks_oversize_artifact_partial(tmp_path: Path) -> None:
+    produced = tmp_path / "report.pdf"
+    produced.write_bytes(b"x" * 140_507)
+    result = verify_step_outcome(
+        success_criteria="A new PDF is produced with file size below 100 kB",
+        instruction="Make the file smaller than 100kB",
+        result={"ok": True, "output_file": str(produced)},
+        scope_dir=tmp_path,
+    )
+    assert result.verified is False
+    assert result.method == "constraint_unmet"
+    assert result.partial is True
+    assert "140507" in result.reason
+
+
+def test_size_ceiling_accepts_file_under_limit(tmp_path: Path) -> None:
+    produced = tmp_path / "report.pdf"
+    produced.write_bytes(b"x" * 80_000)
+    result = verify_step_outcome(
+        success_criteria="A new PDF is produced with file size below 100 kB",
+        instruction="Compress the PDF",
+        result={"ok": True, "output_file": str(produced)},
+        scope_dir=tmp_path,
+    )
+    assert result.verified is True
+    assert result.partial is False
 
 
 def test_declared_artifact_count_read_from_structured_criteria(tmp_path: Path) -> None:
@@ -276,7 +305,7 @@ def test_declared_artifact_count_read_from_structured_criteria(tmp_path: Path) -
         scope_dir=tmp_path,
     )
     assert result.verified is True
-    assert result.method == "artifact"
+    assert result.method in {"artifact", "relations"}
 
 
 def test_declared_output_that_is_an_input_is_rejected(tmp_path: Path) -> None:
@@ -291,3 +320,77 @@ def test_declared_output_that_is_an_input_is_rejected(tmp_path: Path) -> None:
         baseline_files={source.resolve()},
     )
     assert result.verified is False
+
+
+def test_transform_copy_of_input_fails_novel_vs_inputs(tmp_path: Path) -> None:
+    source = write_solid_png(tmp_path / "a.png", rgb=(12, 34, 56))
+    produced = write_solid_png(tmp_path / "a_out.png", rgb=(12, 34, 56))
+    result = verify_step_outcome(
+        success_criteria="Add a mark across the attached images and save new files",
+        instruction="Add a mark across these images",
+        result={"ok": True, "output_files": [str(produced)]},
+        scope_dir=tmp_path,
+        known_inputs=[source],
+        baseline_files={source.resolve()},
+    )
+    assert result.verified is False
+    assert result.method == "relation_unmet"
+    assert result.partial is True
+
+
+def test_transform_changed_content_passes_novel_vs_inputs(tmp_path: Path) -> None:
+    source = write_solid_png(tmp_path / "a.png", rgb=(12, 34, 56))
+    produced = write_solid_png(tmp_path / "a_out.png", rgb=(200, 10, 10))
+    result = verify_step_outcome(
+        success_criteria="Add a mark across the attached images and save new files",
+        instruction="Add a mark across these images",
+        result={"ok": True, "output_files": [str(produced)]},
+        scope_dir=tmp_path,
+        known_inputs=[source],
+        baseline_files={source.resolve()},
+    )
+    assert result.verified is True
+    assert result.method == "relations"
+
+
+def test_structured_relations_are_binding(tmp_path: Path) -> None:
+    source = write_solid_png(tmp_path / "in.png")
+    produced = write_solid_png(tmp_path / "out.png", rgb=(1, 2, 3))
+    result = verify_step_outcome(
+        success_criteria={
+            "text": "new marked images",
+            "relations": [
+                {"type": "produced"},
+                {"type": "novel_vs_inputs"},
+                {"type": "opens_as", "as": "image"},
+                {"type": "count", "equals": 1},
+            ],
+        },
+        instruction="Transform the attached images",
+        result={"ok": True, "output_files": [str(produced)]},
+        scope_dir=tmp_path,
+        known_inputs=[source],
+        baseline_files={source.resolve()},
+    )
+    assert result.verified is True
+    assert result.method == "relations"
+
+
+def test_unreadable_declared_tokens_are_uncertain(tmp_path: Path) -> None:
+    source = write_solid_png(tmp_path / "in.png")
+    produced = write_solid_png(tmp_path / "out.png", rgb=(9, 8, 7))
+    result = verify_step_outcome(
+        success_criteria={
+            "relations": [
+                {"type": "produced"},
+                {"type": "contains_declared", "tokens": ["CONFIDENTIAL"]},
+            ]
+        },
+        instruction="Mark the attached images",
+        result={"ok": True, "output_files": [str(produced)]},
+        scope_dir=tmp_path,
+        known_inputs=[source],
+        baseline_files={source.resolve()},
+    )
+    assert result.verified is False
+    assert result.method == "uncertain"

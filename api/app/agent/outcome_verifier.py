@@ -11,6 +11,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from api.app.agent.outcome_relations import (
+    declared_count,
+    evaluate_relations,
+    has_contract,
+    infer_relations,
+    max_size_bytes,
+    summarize_reports,
+)
+from api.app.agent.outcome_relations import (
+    criteria_text as relation_criteria_text,
+)
+
 _ARTIFACT_SIGNALS = re.compile(
     r"\b("
     r"exists|created|written|saved|output|artifact|record|stored|"
@@ -44,23 +56,49 @@ _PRESERVE_ORIGINAL_SIGNALS = re.compile(
     r"remains?\s+untouched|original\s+(?:file\s+)?(?:remains?|stays?))\b",
     re.IGNORECASE,
 )
-
-
 @dataclass(frozen=True)
 class VerificationResult:
     verified: bool
     reason: str
     method: str
+    partial: bool = False
+    paths: tuple[str, ...] = ()
+
+
+def max_size_bytes_from_contract(text: str) -> int | None:
+    """Largest allowed artifact size when the contract states a ceiling."""
+    return max_size_bytes(text)
+
+
+def _apply_size_contract(
+    paths: Sequence[Path],
+    *,
+    criteria: str,
+    instruction: str,
+    verified: VerificationResult,
+) -> VerificationResult:
+    if not verified.verified:
+        return verified
+    limit = max_size_bytes_from_contract(f"{criteria} {instruction}")
+    if limit is None:
+        return verified
+    for path in paths:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size > limit:
+            return VerificationResult(
+                False,
+                f"{path.name} is {size} bytes; contract requires under {limit} bytes",
+                "constraint_unmet",
+                partial=True,
+            )
+    return verified
 
 
 def criteria_text(raw: Any) -> str:
-    if raw is None:
-        return ""
-    if isinstance(raw, str):
-        return raw.strip()
-    if isinstance(raw, dict):
-        return str(raw.get("text") or raw.get("criteria") or "").strip()
-    return str(raw).strip()
+    return relation_criteria_text(raw)
 
 
 def is_probe_attempt(attempt: dict[str, Any]) -> bool:
@@ -106,25 +144,8 @@ def expects_multiple_artifacts(criteria: str, instruction: str = "") -> bool:
 
 
 def declared_artifact_count(raw: Any) -> int | None:
-    """Output cardinality when a contract states it explicitly.
-
-    Extension point for structured contracts: a planner may pass
-    ``success_criteria`` as a mapping carrying an exact expected count. Absent
-    a declaration, callers fall back to the safe floor of one artifact.
-    """
-    if not isinstance(raw, dict):
-        return None
-    for key in ("expected_artifact_count", "artifact_count", "expected_outputs"):
-        value = raw.get(key)
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, int) and value > 0:
-            return value
-        if isinstance(value, str) and value.strip().isdigit():
-            parsed = int(value.strip())
-            if parsed > 0:
-                return parsed
-    return None
+    """Output cardinality when a contract states it explicitly."""
+    return declared_count(raw)
 
 
 def expects_original_preserved(criteria: str, instruction: str = "") -> bool:
@@ -302,12 +323,44 @@ def _artifact_path_from_payload(payload: dict[str, Any]) -> Path | None:
     return paths[0] if paths else None
 
 
-def _artifact_found(paths: Sequence[Path], *, source: str = "") -> VerificationResult:
+def _artifact_found(
+    paths: Sequence[Path],
+    *,
+    source: str = "",
+    criteria: str = "",
+    instruction: str = "",
+) -> VerificationResult:
+    stored = tuple(str(path) for path in paths)
     if len(paths) == 1:
-        return VerificationResult(True, f"artifact verified at {paths[0]}", "artifact")
-    suffix = f" from {source}" if source else ""
+        found = VerificationResult(
+            True, f"artifact verified at {paths[0]}", "artifact", paths=stored
+        )
+    else:
+        suffix = f" from {source}" if source else ""
+        found = VerificationResult(
+            True,
+            f"verified {len(paths)} artifacts{suffix}",
+            "artifact",
+            paths=stored,
+        )
+    return _with_paths(
+        _apply_size_contract(
+            paths, criteria=criteria, instruction=instruction, verified=found
+        ),
+        paths,
+    )
+
+
+def _with_paths(result: VerificationResult, paths: Sequence[Path]) -> VerificationResult:
+    stored = tuple(str(path) for path in paths)
+    if result.paths:
+        return result
     return VerificationResult(
-        True, f"verified {len(paths)} artifacts{suffix}", "artifact"
+        result.verified,
+        result.reason,
+        result.method,
+        partial=result.partial,
+        paths=stored,
     )
 
 
@@ -329,7 +382,9 @@ def _verify_artifact(
 
     direct_paths = _novel_artifacts(_artifact_paths_from_payload(result), blocked)
     if len(direct_paths) >= required:
-        return _artifact_found(direct_paths)
+        return _artifact_found(
+            direct_paths, criteria=criteria, instruction=instruction
+        )
 
     attempts = result.get("attempts")
     if isinstance(attempts, list):
@@ -341,7 +396,12 @@ def _verify_artifact(
             if collected:
                 break
         if len(collected) >= required:
-            return _artifact_found(collected, source="attempts")
+            return _artifact_found(
+                collected,
+                source="attempts",
+                criteria=criteria,
+                instruction=instruction,
+            )
 
         if widen_search and scope and scope.is_dir():
             extensions = {
@@ -359,10 +419,18 @@ def _verify_artifact(
                     exclude=blocked,
                 )
                 if len(found) >= required:
-                    return VerificationResult(
-                        True,
-                        f"verified {len(found)} scoped artifacts under {search_root}",
-                        "artifact",
+                    return _with_paths(
+                        _apply_size_contract(
+                            found,
+                            criteria=criteria,
+                            instruction=instruction,
+                            verified=VerificationResult(
+                                True,
+                                f"verified {len(found)} scoped artifacts under {search_root}",
+                                "artifact",
+                            ),
+                        ),
+                        found,
                     )
 
     for hint in path_hints_from_criteria(criteria):
@@ -371,8 +439,16 @@ def _verify_artifact(
             continue
         if resolved in blocked:
             continue
-        return VerificationResult(
-            True, f"contract hint matched {resolved}", "artifact"
+        return _with_paths(
+            _apply_size_contract(
+                [resolved],
+                criteria=criteria,
+                instruction=instruction,
+                verified=VerificationResult(
+                    True, f"contract hint matched {resolved}", "artifact"
+                ),
+            ),
+            [resolved],
         )
 
     if scope and scope.is_dir() and criteria:
@@ -388,15 +464,25 @@ def _verify_artifact(
             )
             if len(found) >= required:
                 if len(found) == 1:
-                    return VerificationResult(
+                    scoped = VerificationResult(
                         True,
                         f"scoped artifact verified at {found[0]}",
                         "artifact",
                     )
-                return VerificationResult(
-                    True,
-                    f"verified {len(found)} scoped artifacts under {scope}",
-                    "artifact",
+                else:
+                    scoped = VerificationResult(
+                        True,
+                        f"verified {len(found)} scoped artifacts under {scope}",
+                        "artifact",
+                    )
+                return _with_paths(
+                    _apply_size_contract(
+                        found,
+                        criteria=criteria,
+                        instruction=instruction,
+                        verified=scoped,
+                    ),
+                    found,
                 )
 
     return VerificationResult(
@@ -472,10 +558,42 @@ def verify_step_outcome(
         excluded=excluded,
         required_count=required_count,
     )
+    input_paths = [Path(p) for p in (known_inputs or [])]
+    relations = infer_relations(
+        success_criteria,
+        instruction=instruction_text,
+        has_inputs=any(path.is_file() for path in input_paths),
+    )
+    if artifact_check.verified and relations:
+        produced = [Path(p) for p in artifact_check.paths if Path(p).is_file()]
+        if not produced:
+            produced = _novel_artifacts(
+                _artifact_paths_from_payload(result), excluded
+            )
+        reports = evaluate_relations(
+            relations,
+            produced=produced,
+            known_inputs=input_paths,
+        )
+        method, reason, partial = summarize_reports(reports)
+        if method != "relations":
+            return VerificationResult(
+                False,
+                reason,
+                method,
+                partial=partial,
+                paths=tuple(str(p) for p in produced),
+            )
+        return VerificationResult(
+            True,
+            reason,
+            method,
+            paths=tuple(str(p) for p in produced),
+        )
     if artifact_check.verified:
         return artifact_check
 
-    if kind == "artifact" and criteria:
+    if kind == "artifact" and (criteria or has_contract(success_criteria)):
         return artifact_check
 
     if kind == "informational":

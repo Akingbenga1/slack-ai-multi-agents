@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     anthropic_model_sonnet: str = "claude-sonnet-4-20250514"
     anthropic_max_tokens: int = 1024
     orchestrator_max_tokens: int = 4096
+    # Executor ReAct writes code; it needs more output headroom than the
+    # planner. This is the visible/tool-call budget. Thinking, when enabled,
+    # is reserved separately so a long reason cannot eat the script.
+    executor_max_tokens: int = 8192
+    executor_thinking_tokens: int = 4096
     # Tool RAG — planner shortlist size (clamped 5–20 in tool_rag)
     tool_rag_top_k: int = 12
     tool_rag_use_embeddings: bool = True
@@ -137,6 +142,10 @@ class Settings(BaseSettings):
 
     # Sprint 46 — plan-and-execute facade behind feature flag
     plan_execute_enabled: bool = False
+    # Agent runtime: deep_agents (LangChain harness) is the product path on
+    # this branch. Legacy orchestrator/executor remain in-tree for reference
+    # until fully removed.
+    agent_runtime: str = "deep_agents"
 
     # Executor agent LLM loop (Sprint 48)
     executor_max_tool_rounds: int = 10
@@ -154,6 +163,9 @@ class Settings(BaseSettings):
     executor_reflect_after_failures: int = 3
     # Identical repeated actions tolerated before the loop stops for stalling.
     executor_max_repeated_actions: int = 2
+    # Calls that never reached an instrument (empty script, bad args).
+    # Separate from the repeat budget so they cannot look like a real try.
+    executor_max_malformed_actions: int = 3
     # Per-observation stdout/stderr budget kept in the model transcript; the
     # full text is still recorded on the step result for tracing.
     executor_observation_chars: int = 4000
@@ -168,6 +180,8 @@ class Settings(BaseSettings):
     agent_python_libs_allowlist: str = ""
     # Cap on libraries injected into a single run_python action.
     agent_python_max_libs: int = 8
+    # Drop secret-looking variables from the child process environment.
+    executor_scrub_child_env: bool = True
 
     # CLI tool execution (Sprint 47)
     cli_tools_enabled: bool = True

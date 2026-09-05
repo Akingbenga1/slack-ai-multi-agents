@@ -94,6 +94,7 @@ class DryRunResponse(BaseModel):
     plan_id: str | None = None
     status: str | None = None
     orchestrator_user_prompt: str | None = None
+    planner_raw: str | None = None
     plan_steps: list[dict[str, Any]] | None = None
     step_diagnostics: list[dict[str, Any]] | None = None
     delivered_files: list[str] = Field(default_factory=list)
@@ -260,7 +261,7 @@ async def agent_dry_run(
     db: Annotated[Session, Depends(get_db)],
 ) -> DryRunResponse:
     """
-    Run orchestrator → executor offline for the caller's tenant (no Slack reply).
+    Run the Deep Agents harness offline for the caller's tenant (no Slack reply).
 
     JSON body: ``DryRunRequest`` (optional ``upload_id`` / ``upload_ids`` /
     ``storage_relative_path`` / ``storage_relative_paths``).
@@ -269,7 +270,7 @@ async def agent_dry_run(
     ``storage_relative_path`` fields (stored via BlobStore, not ingested to RAG).
 
     When files are provided, attachment metadata (filename, storage_relative_path,
-    local_path) is passed into ``plan_and_execute`` for the planner/executor.
+    local_path) is passed into ``plan_and_execute`` for the harness workspace.
     """
     _ = db
     from api.app.agent.dry_run_files import (
@@ -391,6 +392,11 @@ async def agent_dry_run(
         status=result.status,
         orchestrator_user_prompt=(
             (str(result.extra.get("orchestrator_user_prompt") or "") or None)
+            if include_trace
+            else None
+        ),
+        planner_raw=(
+            (str(result.extra.get("planner_raw") or "") or None)
             if include_trace
             else None
         ),

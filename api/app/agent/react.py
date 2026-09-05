@@ -42,6 +42,7 @@ from api.app.agent.llm import (
     assistant_action_message,
     tool_observation_message,
 )
+from api.app.agent.outcome_verifier import verify_step_outcome
 from api.app.agent.workspace import RunWorkspace
 from api.app.logging_config import get_logger
 
@@ -95,7 +96,19 @@ _ACTION_NUDGE = (
 )
 # Requests rejected before any instrument ran. They produce no observation of
 # the world, so they are not charged against the action budget.
-_NON_EXECUTING_ERROR_CLASSES = frozenset({"invalid_action"})
+_NON_EXECUTING_ERROR_CLASSES = frozenset({"invalid_action", "truncated_action"})
+_TRUNCATION_NUDGE = (
+    "The previous reply was cut off before a complete action was emitted. "
+    "Call run_python again with the full source in `script`."
+)
+_MALFORMED_GUIDANCE = (
+    "The last action never ran. Provide the complete source in `script`, "
+    "or use a different instrument."
+)
+_MALFORMED_FINISH_GUIDANCE = (
+    "Malformed actions are exhausting the budget. Call finish and report "
+    "the outcome honestly."
+)
 _FINISH_NUDGE = (
     "Do not answer in prose. Call finish with the outcome, the answer text, "
     "and the relative paths of any files you created."
@@ -236,9 +249,12 @@ class StepBudget:
     max_rounds: int = 16
     max_empty_rounds: int = 2
     max_repeats: int = 2
+    max_malformed: int = 3
     reflect_after_failures: int = 3
     max_reflections: int = 2
     wall_clock_seconds: float = 900.0
+    max_tokens: int = 8192
+    thinking_tokens: int = 4096
 
     @classmethod
     def from_settings(cls, settings: Any) -> "StepBudget":
@@ -253,11 +269,20 @@ class StepBudget:
             max_repeats=max(
                 1, int(getattr(settings, "executor_max_repeated_actions", 2) or 2)
             ),
+            max_malformed=max(
+                1, int(getattr(settings, "executor_max_malformed_actions", 3) or 3)
+            ),
             reflect_after_failures=max(
                 1, int(getattr(settings, "executor_reflect_after_failures", 3) or 3)
             ),
             wall_clock_seconds=float(
                 getattr(settings, "executor_step_timeout_seconds", 900.0) or 900.0
+            ),
+            max_tokens=max(
+                1024, int(getattr(settings, "executor_max_tokens", 8192) or 8192)
+            ),
+            thinking_tokens=max(
+                0, int(getattr(settings, "executor_thinking_tokens", 4096) or 0)
             ),
         )
 
@@ -267,7 +292,7 @@ class StepRequest:
     """Everything one goal needs to execute."""
 
     instruction: str
-    success_criteria: str | None
+    success_criteria: Any
     question: str
     workspace: RunWorkspace
     model: ChatModel
@@ -312,6 +337,34 @@ def _action_fingerprint(call: ToolCall) -> tuple[Any, ...]:
     return (name, json.dumps(args, sort_keys=True, default=str))
 
 
+def _python_script_text(call: ToolCall) -> str:
+    args = call.arguments or {}
+    return str(args.get("script") or args.get("code") or args.get("source") or "")
+
+
+def _malformed_action_record(
+    call: ToolCall, *, truncated: bool = False
+) -> dict[str, Any] | None:
+    """Return an observation when the call cannot reach an instrument."""
+    name = (call.name or "").strip()
+    if name == RUN_PYTHON_ACTION and not _python_script_text(call).strip():
+        return {
+            "ok": False,
+            "tool": RUN_PYTHON_ACTION,
+            "error": (
+                "script is missing/empty — provide the complete source in `script`"
+                if not truncated
+                else "script was truncated before it could run"
+            ),
+            "error_class": "truncated_action" if truncated else "invalid_action",
+            "retryable": True,
+            "suggested_next": (
+                _TRUNCATION_NUDGE if truncated else _MALFORMED_GUIDANCE
+            ),
+        }
+    return None
+
+
 def _format_observation(record: dict[str, Any], *, limit: int) -> str:
     """Render one action result as the observation the model reads."""
     tool = str(record.get("tool") or "action")
@@ -345,6 +398,14 @@ def _format_observation(record: dict[str, Any], *, limit: int) -> str:
     return text if len(text) <= limit * 2 else text[: limit * 2]
 
 
+def _format_success_criteria(raw: Any) -> str:
+    if raw is None or raw == "":
+        return "(meet the goal)"
+    if isinstance(raw, str):
+        return raw
+    return json.dumps(raw, default=str)
+
+
 def _initial_user_prompt(request: StepRequest) -> str:
     workspace = request.workspace
     return "\n".join(
@@ -352,7 +413,7 @@ def _initial_user_prompt(request: StepRequest) -> str:
             f"User request: {request.question or '(not provided)'}",
             "",
             f"Goal for this step: {request.instruction}",
-            f"Success criteria: {request.success_criteria or '(meet the goal)'}",
+            f"Success criteria: {_format_success_criteria(request.success_criteria)}",
             "",
             "Workspace inputs (relative paths, already staged):",
             workspace.input_block(),
@@ -386,6 +447,8 @@ class StepExecution:
         self._reflections = 0
         self._empty_rounds = 0
         self._refusals = 0
+        self._malformed = 0
+        self._rejected_finish = 0
         self._finish: dict[str, Any] | None = None
         self._stop_reason: str | None = None
         self._started = time.monotonic()
@@ -405,6 +468,8 @@ class StepExecution:
             return "step time budget exhausted"
         if self._refusals >= self.budget.max_repeats * 3:
             return "no progress: actions kept repeating"
+        if self._malformed >= self.budget.max_malformed:
+            return "no progress: malformed actions"
         return None
 
     def _actions_left(self) -> int:
@@ -495,6 +560,62 @@ class StepExecution:
             else:
                 missing.append(str(raw))
 
+        if missing and self._rejected_finish < 1:
+            self._rejected_finish += 1
+            return {
+                "ok": False,
+                "tool": FINISH_ACTION,
+                "error": f"claimed artifacts not found in workspace: {missing!r}",
+                "error_class": "contract_unmet",
+                "retryable": True,
+                "suggested_next": (
+                    "Create the claimed files in the workspace before finish, "
+                    "or omit paths that do not exist."
+                ),
+                "confirmed_artifacts": confirmed,
+                "missing_artifacts": missing,
+                "ends_step": False,
+            }
+
+        produced = [
+            path
+            for path in self.workspace.files_since(self.baseline)
+            if not self.workspace.is_internal(path)
+        ]
+        preview = {
+            "ok": True,
+            "output_files": [str(p) for p in produced],
+            "produced_relative": [self.workspace.relative_of(p) for p in produced],
+            "done_text": answer,
+        }
+        if confirmed:
+            preview["output_file"] = confirmed[0]
+        elif produced:
+            preview["output_file"] = str(produced[0])
+        check = verify_step_outcome(
+            success_criteria=self.request.success_criteria,
+            instruction=self.request.instruction,
+            result=preview,
+            scope_dir=self.workspace.root,
+            known_inputs=self.workspace.input_paths,
+            baseline_files=self.baseline.keys(),
+        )
+        if not check.verified and self._rejected_finish < 1:
+            self._rejected_finish += 1
+            return {
+                "ok": False,
+                "tool": FINISH_ACTION,
+                "error": check.reason,
+                "error_class": "contract_unmet",
+                "retryable": True,
+                "suggested_next": (
+                    "The produced file does not yet meet the contract. "
+                    "Adjust the work and try again before finish."
+                ),
+                "ends_step": False,
+                "outcome": "partial",
+            }
+
         self._finish = {
             "status": status or "blocked",
             "answer": answer,
@@ -511,6 +632,7 @@ class StepExecution:
             "suggested_next": "",
             "confirmed_artifacts": confirmed,
             "missing_artifacts": missing,
+            "ends_step": True,
         }
         if missing:
             record["stderr"] = (
@@ -531,6 +653,8 @@ class StepExecution:
                 model_tier=self.request.model_tier,
                 tools=ACTION_SCHEMAS,
                 tool_choice=TOOL_CHOICE_NONE,
+                max_tokens=self.budget.max_tokens,
+                thinking_tokens=self.budget.thinking_tokens or None,
             )
         except Exception:
             logger.exception("react_reflection_failed")
@@ -570,6 +694,8 @@ class StepExecution:
                     model_tier=self.request.model_tier,
                     tools=ACTION_SCHEMAS,
                     tool_choice=self._tool_choice(),
+                    max_tokens=self.budget.max_tokens,
+                    thinking_tokens=self.budget.thinking_tokens or None,
                 )
             except Exception as exc:
                 logger.exception("react_model_call_failed")
@@ -581,6 +707,12 @@ class StepExecution:
                 if text == EMPTY_COMPLETION_TEXT:
                     text = ""
                 if not text:
+                    if (llm.stop_reason or "").lower() == "max_tokens":
+                        self._malformed += 1
+                        self.transcript.append(
+                            {"role": "user", "content": _TRUNCATION_NUDGE}
+                        )
+                        continue
                     self._empty_rounds += 1
                     if self._empty_rounds > self.budget.max_empty_rounds:
                         self._stop_reason = EMPTY_COMPLETION_TEXT
@@ -609,14 +741,15 @@ class StepExecution:
                 assistant_action_message(llm.text or "", llm.tool_calls)
             )
 
+            truncated = (llm.stop_reason or "").lower() == "max_tokens"
             finished = False
             for call in llm.tool_calls:
                 name = (call.name or "").strip()
                 if name == FINISH_ACTION:
                     record = self._handle_finish(call)
-                    finished = True
+                    finished = bool(record.get("ends_step", True))
                 else:
-                    record = self._run_one(call, rounds)
+                    record = self._run_one(call, rounds, truncated=truncated)
                 self.actions.append({**record, "round": rounds})
                 self.transcript.append(
                     tool_observation_message(
@@ -633,8 +766,11 @@ class StepExecution:
 
         return self._build_result()
 
-    def _run_one(self, call: ToolCall, rounds: int) -> dict[str, Any]:
+    def _run_one(
+        self, call: ToolCall, rounds: int, *, truncated: bool = False
+    ) -> dict[str, Any]:
         """Budget and stall checks, then dispatch one non-finish action."""
+        _ = rounds
         if self._actions_left() <= 0:
             return self._refusal_record(
                 call,
@@ -647,6 +783,10 @@ class StepExecution:
                 "step time budget exhausted",
                 "Time is spent. Call finish and report the outcome honestly.",
             )
+
+        early = _malformed_action_record(call, truncated=truncated)
+        if early is not None:
+            return self._record_malformed(early)
 
         fingerprint = _action_fingerprint(call)
         seen = self._fingerprints.get(fingerprint, 0)
@@ -674,15 +814,27 @@ class StepExecution:
             }
 
         if record.get("error_class") in _NON_EXECUTING_ERROR_CLASSES:
-            # The request never reached an instrument, so it buys no information
-            # and must not consume an attempt the outcome still needs. The round
-            # ceiling remains, so malformed calls cannot loop without end.
+            # Never-executed calls must not look like a real try: undo the
+            # action spend and drop the fingerprint so a later complete
+            # script is not blocked as a repeat of an empty one.
             self._executed -= 1
+            self._fingerprints.pop(fingerprint, None)
+            return self._record_malformed(record)
 
         if record.get("ok"):
             self._consecutive_failures = 0
         else:
             self._consecutive_failures += 1
+        return record
+
+    def _record_malformed(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Count a never-executed call and attach escalating guidance."""
+        self._malformed += 1
+        remaining = self.budget.max_malformed - self._malformed
+        if remaining <= 0:
+            record["suggested_next"] = _MALFORMED_FINISH_GUIDANCE
+        elif remaining == 1:
+            record["suggested_next"] = _MALFORMED_GUIDANCE
         return record
 
     # -- result ---------------------------------------------------------
@@ -733,6 +885,7 @@ class StepExecution:
             result["stdout"] = stdout
         if self._stop_reason:
             result["stop_reason"] = self._stop_reason
+        result["malformed_count"] = self._malformed
         if claim.get("missing_artifacts"):
             result["missing_artifacts"] = claim["missing_artifacts"]
         if not ok:

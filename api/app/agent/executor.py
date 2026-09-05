@@ -67,6 +67,7 @@ from api.app.agent.outcome_verifier import (
     combine_results_for_plan_check,
     criteria_text,
     existing_files_in_scope,
+    has_contract,
     verify_step_outcome,
 )
 from api.app.logging_config import get_logger, log_tool_rag_activity
@@ -261,7 +262,7 @@ def _run_english_goal_react(
     extra: dict[str, Any],
     db: Session,
     instruction: str,
-    success_criteria: str | None,
+    success_criteria: Any,
     step_arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """Run one plain-English goal through the ReAct engine."""
@@ -442,6 +443,7 @@ def _record_step_diagnostic(
             "stop_reason",
             "verification_method",
             "verification_reason",
+            "outcome",
         ):
             if result.get(key) is not None:
                 entry[key] = result[key]
@@ -517,8 +519,7 @@ def _plan_goal_verification(
     final = _final_goal_step(steps)
     if final is None:
         return None
-    criteria = criteria_text(final.success_criteria)
-    if not criteria:
+    if not has_contract(final.success_criteria):
         return None
     merged = combine_results_for_plan_check(step_results)
     for key in ("output_file", "path", "stdout", "done_text", "attempts"):
@@ -526,10 +527,12 @@ def _plan_goal_verification(
             merged[key] = current_result.get(key)
     if current_result.get("ok"):
         merged["ok"] = True
-    instruction = english_instruction(tool_arguments(final.arguments)) or criteria
+    instruction = english_instruction(tool_arguments(final.arguments)) or criteria_text(
+        final.success_criteria
+    )
     cwd = scope_dir or _resolve_working_dir(context, invoke_args)
     return verify_step_outcome(
-        success_criteria=criteria,
+        success_criteria=final.success_criteria,
         instruction=instruction,
         result=merged,
         scope_dir=cwd,
@@ -768,7 +771,7 @@ class ExecutorAgent(Agent):
                         extra=extra,
                         db=db,
                         instruction=instruction,
-                        success_criteria=step_criteria or None,
+                        success_criteria=step.success_criteria,
                         step_arguments=invoke_args,
                     )
                 elif tool_name == RUN_UVX_TOOL_NAME:
@@ -876,9 +879,13 @@ class ExecutorAgent(Agent):
                 if verification.verified and not result.get("ok"):
                     result["ok"] = True
                     result["verified"] = True
-                elif result.get("ok") and not verification.verified:
+                    result["outcome"] = "succeeded"
+                elif not verification.verified:
                     result["ok"] = False
                     result["error"] = verification.reason
+                    result["outcome"] = (
+                        "partial" if verification.partial else "failed"
+                    )
 
             failed = result_error(result)
             if failed:

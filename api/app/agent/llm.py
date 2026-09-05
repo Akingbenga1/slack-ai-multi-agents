@@ -150,6 +150,7 @@ class ChatModel(Protocol):
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
         tool_choice: str | None = None,
+        thinking_tokens: int | None = None,
     ) -> LlmResult: ...
 
 
@@ -182,12 +183,14 @@ class StubChatModel:
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
         tool_choice: str | None = None,
+        thinking_tokens: int | None = None,
     ) -> LlmResult:
         _log_complete_prompts(
             system=system, messages=messages, model_tier=model_tier
         )
         _ = max_tokens
         _ = tool_choice
+        _ = thinking_tokens
         _ = system
         user = ""
         for m in reversed(messages):
@@ -264,21 +267,24 @@ class AnthropicChatModel:
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
         tool_choice: str | None = None,
+        thinking_tokens: int | None = None,
     ) -> LlmResult:
         _log_complete_prompts(
             system=system, messages=messages, model_tier=model_tier
         )
         model = self._model_id(model_tier)
+        output_budget = (
+            max_tokens if max_tokens is not None else self._config.max_tokens
+        )
+        think = max(0, int(thinking_tokens or 0))
         kwargs: dict[str, Any] = {
             "model": model,
-            "max_tokens": (
-                max_tokens
-                if max_tokens is not None
-                else self._config.max_tokens
-            ),
+            "max_tokens": output_budget + think if think else output_budget,
             "system": system,
             "messages": _to_anthropic_messages(messages),
         }
+        if think > 0:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": think}
         mapped = _to_anthropic_tools(_bound_tools(tools))
         if mapped:
             kwargs["tools"] = mapped
@@ -342,10 +348,12 @@ class OpenAICompatChatModel:
         tools: list[ToolSchema] | None = None,
         max_tokens: int | None = None,
         tool_choice: str | None = None,
+        thinking_tokens: int | None = None,
     ) -> LlmResult:
         _log_complete_prompts(
             system=system, messages=messages, model_tier=model_tier
         )
+        _ = thinking_tokens
         model = self._model_id(model_tier)
         payload: dict[str, Any] = {
             "model": model,

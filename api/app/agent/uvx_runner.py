@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from api.app.agent.sandbox import child_environment
 from api.app.logging_config import get_logger
 from api.app.settings import get_settings
 
@@ -380,6 +381,7 @@ def run_uvx(
         output_dir.mkdir(parents=True, exist_ok=True)
         before_output_dir = _snapshot_dir_files(output_dir)
 
+    child_env = child_environment(settings)
     logger.info("uvx_exec cmd=%s cwd=%s", cmd, workdir)
     try:
         completed = subprocess.run(
@@ -388,6 +390,7 @@ def run_uvx(
             text=True,
             timeout=timeout,
             cwd=workdir,
+            env=child_env,
         )
     except FileNotFoundError as exc:
         raise UvxRunnerError(

@@ -20,7 +20,7 @@ from api.app.agent.guardrails import (
     PLAN_SAFETY_REFUSAL,
     find_destructive_plan_violations,
 )
-from api.app.agent.llm import ChatModel, get_chat_model
+from api.app.agent.llm import EMPTY_COMPLETION_TEXT, ChatModel, get_chat_model
 from api.app.agent.plan_steps import (
     ADVICE_STEP_TOOL_NAME,
     EXECUTE_GOAL_TOOL_NAME,
@@ -49,7 +49,11 @@ _PLAN_SYSTEM = (
     "refuse a request merely because it asks for a particular output format. "
     "Do NOT use a tool registry or tool catalog. Plan in plain English only. "
     "Each work step must use tool_name \"execute_goal\" with arguments.instruction "
-    "(plain English) and success_criteria describing done. "
+    "(plain English) and success_criteria. A short English string is valid. "
+    "An object {\"text\": \"<note>\", \"relations\": [{\"type\": \"<kind>\"}]} is "
+    "also valid. Allowed relation types only: produced, opens_as, novel_vs_inputs, "
+    "preserves_originals, count, size, contains_declared. Include only types that "
+    "apply. Use novel_vs_inputs when the request transforms existing inputs. "
     "Do not invent CLI package names, uvx commands, or registry tool ids at plan time — "
     "the Executor chooses packages and runs real uvx later. "
     "When a stored workflow body is provided, treat it as the primary guide: read "
@@ -70,18 +74,23 @@ _PLAN_SYSTEM = (
     "given the attachment metadata in the user message. "
     "Advice steps may set \"stop_after\": true when they block further work; "
     "otherwise later steps may still run. "
-    "Reply with JSON: {\"workflow\": \"<type>\", \"steps\": ["
+    "Reply with JSON only: {\"workflow\": \"<type>\", \"steps\": ["
     "{\"tool_name\": \"execute_goal\", "
-    "\"arguments\": {\"instruction\": \"...\"}, \"success_criteria\": \"...\", "
+    "\"arguments\": {\"instruction\": \"...\"}, "
+    "\"success_criteria\": \"<short done note>\", "
     "\"requires_attachment\": false}, "
     "{\"step_type\": \"advice\", \"advice\": \"...\", \"success_criteria\": \"...\"}, "
     "{\"step_type\": \"halt\", \"message\": \"...\"}]}. "
+    "Keep success_criteria compact. Prefer a short string. If you emit relations, "
+    "emit a small list — never a catalog of unused types. "
     "SAFETY GUARDRAILS (mandatory — never violate): "
     "NEVER plan steps that delete, remove, truncate, drop, purge, wipe, erase, "
     "destroy, unlink, or overwrite existing files, directories, blobs, uploads, "
     "attachments, or workflow-library originals. "
     "Creating or uploading new output files is allowed; deleting or replacing "
     "existing stored data is forbidden. "
+    "Writing new artifacts from existing inputs is not overwrite. Return empty "
+    "steps only when the user asked to delete or destroy stored data. "
     "NEVER plan database mutations that DELETE rows, DROP or TRUNCATE tables or "
     "schemas, or run destructive SQL (DELETE, DROP, TRUNCATE, ALTER ... DROP). "
     "Read-only DB access (SELECT, list, get, search) is allowed. "
@@ -95,12 +104,12 @@ _PLAN_SYSTEM = (
     "Plan the minimum steps needed: each execute_goal should perform one distinct "
     "transformation. When a step creates a new file in the working directory, do not "
     "add a follow-up step to upload, save, or re-register that same artifact unless "
-    "the user explicitly asked for a separate delivery action. Describe in "
-    "success_criteria what each step produces. "
+    "the user explicitly asked for a separate delivery action. Put the outcome "
+    "contract in success_criteria, not in extra inspect steps. "
     "When the user attached a file and the request is a single transformation on that "
     "file (split, convert, merge, extract, export), plan one execute_goal step that "
     "delivers the outcome directly. Do not add separate validation, readability, "
-    "existence-check, or inspect steps when attachment metadata is already present."
+    "existence-check, or inspect steps; the checker evaluates the relations."
 )
 
 
@@ -123,6 +132,51 @@ def _chat_model(extra: dict[str, Any]) -> ChatModel:
     return get_chat_model()
 
 
+def _loads_plan_json(blob: str) -> Any | None:
+    """Parse one JSON value; tolerate trailing text and trailing commas."""
+    text = (blob or "").strip()
+    if not text:
+        return None
+    variants = [text, _strip_trailing_commas(text)]
+    for candidate in variants:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        try:
+            value, _end = json.JSONDecoder().raw_decode(candidate)
+            return value
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _strip_trailing_commas(text: str) -> str:
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def _plan_items(parsed: Any) -> tuple[str, list[Any]]:
+    """Extract workflow + step list from common planner shapes."""
+    if isinstance(parsed, list):
+        return "qa", parsed
+    if not isinstance(parsed, dict):
+        return "qa", []
+    workflow = str(parsed.get("workflow") or "qa").strip() or "qa"
+    for key in ("steps", "plan_steps"):
+        items = parsed.get(key)
+        if isinstance(items, list):
+            return workflow, items
+    nested = parsed.get("plan")
+    if isinstance(nested, list):
+        return workflow, nested
+    if isinstance(nested, dict):
+        items = nested.get("steps")
+        if isinstance(items, list):
+            nested_wf = str(nested.get("workflow") or workflow).strip() or workflow
+            return nested_wf, items
+    return workflow, []
+
+
 def parse_plan(raw: str) -> tuple[str, list[dict[str, Any]]]:
     """Parse workflow and steps from model JSON. Returns (workflow, steps)."""
     text = (raw or "").strip()
@@ -136,25 +190,20 @@ def parse_plan(raw: str) -> tuple[str, list[dict[str, Any]]]:
     end = text.rfind("}")
     if start >= 0 and end > start:
         candidates.append(text[start : end + 1])
+    array_start = text.find("[")
+    array_end = text.rfind("]")
+    if array_start >= 0 and array_end > array_start:
+        candidates.append(text[array_start : array_end + 1])
     parsed: Any = None
     for blob in candidates:
-        try:
-            parsed = json.loads(blob)
+        parsed = _loads_plan_json(blob)
+        if parsed is not None:
             break
-        except json.JSONDecodeError:
-            continue
     if parsed is None:
         return "qa", []
-    workflow = "qa"
-    if isinstance(parsed, dict):
-        workflow = str(parsed.get("workflow") or "qa").strip() or "qa"
-        items = parsed.get("steps", [])
-        if not isinstance(items, list):
-            return workflow, []
-    elif isinstance(parsed, list):
-        items = parsed
-    else:
-        return "qa", []
+    workflow, items = _plan_items(parsed)
+    if not items:
+        return workflow, []
     steps: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -163,12 +212,33 @@ def parse_plan(raw: str) -> tuple[str, list[dict[str, Any]]]:
         criteria = item.get("success_criteria")
         if criteria is None:
             criteria = item.get("success")
+        if isinstance(criteria, list):
+            criteria = {"relations": criteria}
+        sibling_relations = item.get("relations")
+        if isinstance(sibling_relations, list):
+            if isinstance(criteria, str) and criteria.strip():
+                criteria = {"text": criteria, "relations": sibling_relations}
+            elif isinstance(criteria, dict) and "relations" not in criteria:
+                criteria = {**criteria, "relations": sibling_relations}
+            elif criteria is None:
+                criteria = {"relations": sibling_relations}
         preconditions = extract_preconditions(item)
         on_precondition_fail = extract_on_precondition_fail(item)
         stop_after = item.get("stop_after")
-        message_text = str(
-            item.get("advice") or item.get("message") or item.get("text") or ""
+        raw_args = item.get("arguments")
+        args = dict(raw_args) if isinstance(raw_args, dict) else {}
+        instruction = str(
+            args.get("instruction")
+            or args.get("goal")
+            or item.get("instruction")
+            or item.get("goal")
+            or ""
         ).strip()
+        message_text = str(
+            item.get("advice") or item.get("message") or ""
+        ).strip()
+        if not message_text and not instruction:
+            message_text = str(item.get("text") or "").strip()
         if step_type == STEP_TYPE_HALT:
             if message_text:
                 steps.append(
@@ -183,10 +253,8 @@ def parse_plan(raw: str) -> tuple[str, list[dict[str, Any]]]:
                     }
                 )
             continue
-        if step_type == STEP_TYPE_ADVICE or (
-            not str(item.get("tool_name") or item.get("name") or "").strip()
-            and message_text
-        ):
+        named = str(item.get("tool_name") or item.get("name") or "").strip()
+        if step_type == STEP_TYPE_ADVICE or (not named and message_text and not instruction):
             if message_text:
                 step_payload: dict[str, Any] = {
                     "tool_name": ADVICE_STEP_TOOL_NAME,
@@ -201,16 +269,7 @@ def parse_plan(raw: str) -> tuple[str, list[dict[str, Any]]]:
                     step_payload["stop_after"] = bool(stop_after)
                 steps.append(step_payload)
             continue
-        name = str(item.get("tool_name") or item.get("name") or "").strip()
-        raw_args = item.get("arguments")
-        args = dict(raw_args) if isinstance(raw_args, dict) else {}
-        instruction = str(
-            args.get("instruction")
-            or args.get("goal")
-            or item.get("instruction")
-            or item.get("goal")
-            or ""
-        ).strip()
+        name = named
         if instruction and "instruction" not in args:
             args["instruction"] = instruction
         if criteria is not None and "success_criteria" not in args:
@@ -250,6 +309,62 @@ def parse_plan_steps(raw: str) -> list[dict[str, Any]]:
     """Parse JSON steps from model text. Empty list if none are usable."""
     _, steps = parse_plan(raw)
     return steps
+
+
+def _explicit_empty_steps(raw: str) -> bool:
+    """True when the model returned a plan object whose steps list is empty."""
+    text = (raw or "").strip()
+    if not text:
+        return False
+    parsed = _loads_plan_json(text)
+    if parsed is None:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            parsed = _loads_plan_json(text[start : end + 1])
+    if not isinstance(parsed, dict):
+        return False
+    items = parsed.get("steps", parsed.get("plan_steps"))
+    return isinstance(items, list) and len(items) == 0
+
+
+def _looks_like_json_plan(raw: str) -> bool:
+    text = (raw or "").strip()
+    if "{" in text and any(
+        token in text
+        for token in ("steps", "tool_name", "instruction", "workflow", "execute_goal")
+    ):
+        return True
+    return text.startswith("[{") or text.startswith("[ {")
+
+
+def recover_execute_goal_steps(
+    raw: str,
+    question: str,
+    *,
+    has_attachments: bool = False,
+) -> list[dict[str, Any]]:
+    """If planner JSON is unusable, the user request is still one execute_goal."""
+    q = (question or "").strip()
+    if not q or _explicit_empty_steps(raw):
+        return []
+    text = (raw or "").strip()
+    empty = (not text) or text == EMPTY_COMPLETION_TEXT
+    if not empty and not _looks_like_json_plan(text):
+        return []
+    preconditions: dict[str, Any] = {}
+    if has_attachments:
+        preconditions["requires_attachment"] = True
+    step: dict[str, Any] = {
+        "tool_name": EXECUTE_GOAL_TOOL_NAME,
+        "arguments": {"instruction": q},
+        "success_criteria": q,
+        "step_type": STEP_TYPE_TOOL,
+        "preconditions": preconditions,
+    }
+    if has_attachments:
+        step["requires_attachment"] = True
+    return [step]
 
 
 def _workflow_body_for_prompt(
@@ -302,7 +417,7 @@ def _planning_user_message(
         parts.append(
             "Use the stored workflow document body as the source of truth. "
             "Turn each automatable document step into an execute_goal with a clear "
-            "English instruction and success_criteria. "
+            "English instruction and relation-typed success_criteria. "
             "For steps that cannot be automated, add an advice step."
         )
     if gathered.channel_names:
@@ -323,13 +438,18 @@ def _persist(
     status: str,
     error: str | None,
     workflow: str = "qa",
+    planner_raw: str | None = None,
 ) -> UUID:
     source = gathered.as_source()
     if error:
         source["error"] = error
+    if planner_raw:
+        source["planner_raw"] = planner_raw[:8000]
     plan_json: dict[str, Any] = {"workflow": workflow, "steps": steps}
     if error:
         plan_json["error"] = error
+    if planner_raw and error:
+        plan_json["planner_raw"] = planner_raw[:8000]
     plan = insert_agent_plan(
         db,
         tenant_id=tenant_id,
@@ -448,6 +568,19 @@ class OrchestratorAgent(Agent):
             max_tokens=settings.orchestrator_max_tokens,
         )
         workflow, steps = parse_plan(result.text)
+        if not steps:
+            recovered = recover_execute_goal_steps(
+                result.text,
+                context.question,
+                has_attachments=bool(gathered.attachments),
+            )
+            if recovered:
+                logger.warning(
+                    "orchestrator_plan_recovered_execute_goal client_id=%s raw_chars=%s",
+                    context.client_id,
+                    len(result.text or ""),
+                )
+                steps = recovered
         planned_tools = [
             str(step.get("tool_name") or "")
             for step in steps
@@ -516,6 +649,7 @@ class OrchestratorAgent(Agent):
                 status="failed",
                 error=error,
                 workflow=workflow,
+                planner_raw=result.text,
             )
             return AgentResult(
                 role=self.role,

@@ -1042,6 +1042,7 @@ def test_finish_claim_without_artifact_is_not_success(
         [
             _make_tool_call("run_python", {"script": "pass", "libs": []}),
             _finish_call(answer="created it", artifacts=["missing.pdf"]),
+            _finish_call(answer="created it", artifacts=["missing.pdf"]),
         ]
     )
     settings = Settings(executor_uvx_max_attempts=4, executor_empty_continuations=0)
