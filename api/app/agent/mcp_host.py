@@ -1,7 +1,7 @@
 """MCP server readiness — probe registered servers (control plane).
 
-Used by admin/ops endpoints only. The orchestrator never calls this; the
-executor only uses servers that are already reachable.
+Used by admin/ops endpoints only. The Deep Agents harness does not call
+this; it only uses servers that are already reachable when needed.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ class McpCheckResult:
     endpoint: str | None
     tool_count: int | None
     tool_names: list[str] = field(default_factory=list)
+    tool_defs: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     detail: str | None = None
 
@@ -98,6 +99,32 @@ def extract_stdio_launch(
     return command.strip(), args, env
 
 
+def extract_http_headers(config: dict[str, Any] | None) -> dict[str, str] | None:
+    """Return non-secret HTTP headers from connection_config when present."""
+    cfg = as_config_dict(config)
+    raw = cfg.get("headers")
+    if not isinstance(raw, dict) or not raw:
+        return None
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, str) and key.strip() and value:
+            out[key.strip()] = value
+    return out or None
+
+
+def merge_service_auth_headers(
+    config: dict[str, Any] | None,
+    *,
+    service_token: str | None = None,
+) -> dict[str, str] | None:
+    """Build request headers: optional config headers + Bearer service credential."""
+    headers = dict(extract_http_headers(config) or {})
+    token = (service_token or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers or None
+
+
 def _validate_http_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -110,11 +137,22 @@ def _validate_http_url(url: str) -> str:
     return url
 
 
-async def _list_tools_http(url: str, *, timeout: float) -> list[str]:
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+def _split_tool_defs(defs: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:
+    trimmed = defs[:50]
+    names = [str(d.get("name") or "") for d in trimmed if d.get("name")]
+    return names, trimmed
 
-    async with streamablehttp_client(url, timeout=timeout) as (
+
+async def _list_tools_http(
+    url: str,
+    *,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    async with streamable_http_client(url, headers=headers, timeout=timeout) as (
         read,
         write,
         _get_session_id,
@@ -122,7 +160,17 @@ async def _list_tools_http(url: str, *, timeout: float) -> list[str]:
         async with ClientSession(read, write) as session:
             await session.initialize()
             listed = await session.list_tools()
-            return [t.name for t in (listed.tools or [])]
+            out: list[dict[str, Any]] = []
+            for t in listed.tools or []:
+                schema = getattr(t, "inputSchema", None) or getattr(t, "input_schema", None)
+                out.append(
+                    {
+                        "name": t.name,
+                        "description": getattr(t, "description", None) or "",
+                        "inputSchema": schema if isinstance(schema, dict) else {},
+                    }
+                )
+            return out
 
 
 async def _list_tools_stdio(
@@ -131,7 +179,7 @@ async def _list_tools_stdio(
     env: dict[str, str] | None,
     *,
     timeout: float,
-) -> list[str]:
+) -> list[dict[str, Any]]:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -148,7 +196,17 @@ async def _list_tools_stdio(
         async with ClientSession(read, write) as session:
             await session.initialize()
             listed = await session.list_tools()
-            return [t.name for t in (listed.tools or [])]
+            out: list[dict[str, Any]] = []
+            for t in listed.tools or []:
+                schema = getattr(t, "inputSchema", None) or getattr(t, "input_schema", None)
+                out.append(
+                    {
+                        "name": t.name,
+                        "description": getattr(t, "description", None) or "",
+                        "inputSchema": schema if isinstance(schema, dict) else {},
+                    }
+                )
+            return out
 
 
 async def _http_fallback_reachable(url: str, *, timeout: float) -> None:
@@ -192,10 +250,14 @@ def check_mcp_server(
     connection_config: dict[str, Any] | None,
     enabled: bool,
     timeout_seconds: float = 20.0,
+    service_token: str | None = None,
 ) -> McpCheckResult:
     """Probe one registered MCP server for initialize + list_tools readiness."""
     timeout = max(1.0, float(timeout_seconds))
     transport_norm = (transport or "").strip().lower() or "http"
+    http_headers = merge_service_auth_headers(
+        connection_config, service_token=service_token
+    )
 
     if not enabled:
         return McpCheckResult(
@@ -239,7 +301,11 @@ def check_mcp_server(
                 detail=exc.code,
             )
         try:
-            names = _run_async(_list_tools_http(url, timeout=timeout), timeout=timeout)
+            defs = _run_async(
+                _list_tools_http(url, timeout=timeout, headers=http_headers),
+                timeout=timeout,
+            )
+            names, tool_defs = _split_tool_defs(defs)
             return McpCheckResult(
                 server_name=server_name,
                 transport=transport_norm,
@@ -247,7 +313,8 @@ def check_mcp_server(
                 enabled=True,
                 endpoint=url,
                 tool_count=len(names),
-                tool_names=names[:50],
+                tool_names=names,
+                tool_defs=tool_defs,
                 error=None,
                 detail=f"initialize ok · {len(names)} tool(s)",
             )
@@ -328,10 +395,11 @@ def check_mcp_server(
             )
         endpoint = " ".join([command, *args]).strip()
         try:
-            names = _run_async(
+            defs = _run_async(
                 _list_tools_stdio(command, args, env, timeout=timeout),
                 timeout=timeout,
             )
+            names, tool_defs = _split_tool_defs(defs)
             return McpCheckResult(
                 server_name=server_name,
                 transport=transport_norm,
@@ -339,7 +407,8 @@ def check_mcp_server(
                 enabled=True,
                 endpoint=endpoint,
                 tool_count=len(names),
-                tool_names=names[:50],
+                tool_names=names,
+                tool_defs=tool_defs,
                 error=None,
                 detail=f"initialize ok · {len(names)} tool(s)",
             )
@@ -375,11 +444,12 @@ async def _call_tool_http(
     arguments: dict[str, Any],
     *,
     timeout: float,
+    headers: dict[str, str] | None = None,
 ) -> Any:
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
-    async with streamablehttp_client(url, timeout=timeout) as (
+    async with streamable_http_client(url, headers=headers, timeout=timeout) as (
         read,
         write,
         _get_session_id,
@@ -425,6 +495,7 @@ def call_registered_mcp_tool(
     tool_name: str,
     arguments: dict[str, Any],
     timeout_seconds: float | None = None,
+    service_token: str | None = None,
 ) -> Any:
     """Open a live MCP session from ``connection_config`` and call ``tool_name``.
 
@@ -440,6 +511,9 @@ def call_registered_mcp_tool(
     )
     timeout = max(1.0, timeout)
     transport_norm = (transport or "").strip().lower() or "http"
+    http_headers = merge_service_auth_headers(
+        connection_config, service_token=service_token
+    )
 
     if not enabled:
         raise McpHostError(
@@ -461,7 +535,13 @@ def call_registered_mcp_tool(
             tool_name,
         )
         return _run_async(
-            _call_tool_http(url, tool_name, arguments, timeout=timeout),
+            _call_tool_http(
+                url,
+                tool_name,
+                arguments,
+                timeout=timeout,
+                headers=http_headers,
+            ),
             timeout=timeout,
         )
 
@@ -533,6 +613,7 @@ def check_bundled_mcp(*, timeout_seconds: float = 20.0) -> McpCheckResult:
 
     try:
         names = _run_async(_probe(), timeout=timeout)
+        trimmed = names[:50]
         return McpCheckResult(
             server_name="__bundled__",
             transport="bundled",
@@ -540,7 +621,8 @@ def check_bundled_mcp(*, timeout_seconds: float = 20.0) -> McpCheckResult:
             enabled=True,
             endpoint=sys.executable,
             tool_count=len(names),
-            tool_names=names[:50],
+            tool_names=trimmed,
+            tool_defs=[{"name": n, "description": "", "inputSchema": {}} for n in trimmed],
             error=None,
             detail=f"bundled MCP ready · {len(names)} tool(s)",
         )

@@ -1,12 +1,11 @@
-"""Executor tool discovery, lookup, and invoke.
+"""Tool discovery, lookup, and invoke.
 
 Tool discovery is DB-driven via ``tool_registry`` (or injected at runtime
 for tests). ``kind=code`` tools are executed by built-in in-process
 handlers keyed by tool name (for example ``search_knowledge``).
 
 ``ToolDiscovery`` is the abstract protocol; ``DbToolDiscovery`` is the
-concrete implementation backed by Postgres. The executor and orchestrator
-use the protocol only.
+concrete implementation backed by Postgres.
 """
 
 from __future__ import annotations
@@ -446,6 +445,8 @@ def _invoke_mcp(
         )
 
     from api.app.agent.mcp_host import McpHostError, call_registered_mcp_tool
+    from api.app.db.tool_store import decrypt_mcp_server_secret
+    from api.app.settings import get_settings
 
     cfg = (
         server.connection_config
@@ -466,6 +467,7 @@ def _invoke_mcp(
             enabled=server.enabled,
             tool_name=ref.name,
             arguments=mcp_arguments,
+            service_token=decrypt_mcp_server_secret(server, get_settings()),
         )
     except McpHostError as exc:
         if getattr(exc, "code", None) == "server_disabled":

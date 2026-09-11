@@ -185,7 +185,7 @@ def stage_intake(ctx: ReplyPipelineContext) -> ReplyPipelineContext:
 
 
 def stage_run_agent(ctx: ReplyPipelineContext) -> ReplyPipelineContext:
-    """Send request to the orchestrator → executor via plan_and_execute."""
+    """Send request to the Deep Agents harness via plan_and_execute."""
     assert ctx.db is not None
 
     from api.app.agent.facade import plan_and_execute

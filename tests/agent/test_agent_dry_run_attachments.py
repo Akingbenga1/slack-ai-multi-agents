@@ -14,8 +14,8 @@ from api.app.agent.dry_run_files import (
     attachment_from_storage_relative_path,
     attachment_from_upload_bytes,
     attachment_from_upload_id,
+    attachment_metadata,
 )
-from api.app.agent.gather import attachment_metadata
 from api.app.auth.tokens import create_access_token
 from api.app.main import app
 from api.app.membership import DEMO_ADMIN_ID, DEMO_TENANT_ID

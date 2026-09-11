@@ -38,7 +38,7 @@ class DryRunRequest(BaseModel):
     )
     include_trace: bool = Field(
         default=False,
-        description="When true, return orchestrator prompts (Tool RAG shortlist proof).",
+        description="When true, return harness prompts for debugging.",
     )
     upload_id: Optional[str] = Field(
         default=None,

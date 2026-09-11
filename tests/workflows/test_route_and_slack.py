@@ -12,7 +12,6 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.app.agent.prompts import system_prompt_for
 from api.app.db.models import Tenant, WorkflowTemplate
 from api.app.slack.workflow_actions import (
     copy_workflow_for_slack,
@@ -52,17 +51,6 @@ def tenant(db: Session) -> Tenant:
     db.add(t)
     db.commit()
     return t
-
-
-def test_prompts_exist():
-    for wf in (
-        "workflow_store",
-        "workflow_list",
-        "workflow_copy",
-        "workflow_edit",
-        "workflow_advise",
-    ):
-        assert system_prompt_for(wf)
 
 
 def test_store_from_evidence_and_list(db: Session, tenant: Tenant, tmp_path: Path):

@@ -1,6 +1,6 @@
 """CRUD API for the tool_registry table (tenant-scoped).
 
-All tools the orchestrator/executor can discover live in the DB.
+All tools the product can register live in the DB.
 No hardcoded tool sets — adding or removing a tool is a DB operation.
 """
 

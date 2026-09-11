@@ -1,7 +1,13 @@
+import { getServerSession } from "next-auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { ToolsManagerPanel } from "@/components/tools/ToolsManagerPanel";
+import { authOptions } from "@/lib/auth";
+import { sessionTenantId } from "@/lib/tenant";
 
-export default function OrgToolsPage() {
+export default async function OrgToolsPage() {
+  const session = await getServerSession(authOptions);
+  const tenantId = sessionTenantId(session?.user?.tenantId);
+
   return (
     <>
       <PageHeader
@@ -13,7 +19,11 @@ export default function OrgToolsPage() {
         ]}
         className="mb-8"
       />
-      <ToolsManagerPanel createHref="/app/tools/new" />
+      <ToolsManagerPanel
+        createHref="/app/tools/new"
+        accessToken={session?.accessToken ?? null}
+        tenantId={tenantId}
+      />
     </>
   );
 }

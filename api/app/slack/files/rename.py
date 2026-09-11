@@ -51,12 +51,19 @@ _RENAME_TO_RE = re.compile(
     re.I,
 )
 
+_FILE_RENAME_BROAD_RE = re.compile(
+    r"("
+    r"\brename\b|"
+    r"\b(change|update)\s+(the\s+)?(file\s+)?name\b|"
+    r"\bfile_rename\b"
+    r")",
+    re.I,
+)
+
 
 def question_requests_rename(question: str) -> bool:
-    """True when the ask includes a file-rename intent (J10 combined asks)."""
-    from api.app.agent.workflows.intents import question_requests_rename as _shared
-
-    return _shared(question)
+    """True when the ask includes a file-rename intent (combined asks)."""
+    return bool(_FILE_RENAME_BROAD_RE.search(question or ""))
 
 
 def parse_requested_filename(

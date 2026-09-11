@@ -1,7 +1,6 @@
 """Deep Agents harness adapter for tenant dry-run / plan-and-execute entry.
 
-Replaces the custom orchestrator → executor loop with LangChain Deep Agents
-while keeping the product contract: tenant-scoped workspace, staged inputs,
+Product entry for tenant office work: tenant-scoped workspace, staged inputs,
 promoted outputs, and outcome verification against observable artifacts.
 """
 
@@ -39,6 +38,9 @@ Rules:
 - Prefer creating new output files; do not delete or replace the user's originals.
 - When transforming an attached file, write a new artifact and leave inputs intact.
 - Use shell/python tools when needed (uvx, python, LibreOffice, etc.).
+- Tenant MCP tools (names starting with mcp__) may be available; after seeing the \
+tool list, call only the MCP tools necessary for this request — not every tool.
+- MCP tools are available when relevant, not required for every request.
 - Verify the outcome yourself (open the file, check pages/text) before finishing.
 - When done, reply with a short plain-language summary of what was produced \
 and where it lives (relative workspace paths).
@@ -215,6 +217,7 @@ def _create_agent(
     model: Any,
     workspace: RunWorkspace,
     settings: Settings,
+    tools: list[Any] | None = None,
 ) -> Any:
     from deepagents import create_deep_agent
     from deepagents.backends import LocalShellBackend
@@ -235,6 +238,7 @@ def _create_agent(
         model=model,
         system_prompt=_SYSTEM_PROMPT,
         backend=backend,
+        tools=list(tools or []),
         name="tenant-office-harness",
     )
 
@@ -279,6 +283,24 @@ def run_deep_agent(
         len(workspace.inputs),
     )
 
+    mcp_runtime = None
+    mcp_tools: list[Any] = []
+    try:
+        from api.app.agent.tenant_mcp import build_tenant_mcp_runtime
+        from api.app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            mcp_runtime = build_tenant_mcp_runtime(
+                db, tenant_id=cid, run_key=run_key, settings=settings
+            )
+            mcp_tools = list(mcp_runtime.tools)
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("tenant_mcp_runtime_failed client_id=%s", cid)
+
     agent = extra.get("harness_agent")
     invoke_error: str | None = None
     raw_result: Any = None
@@ -286,7 +308,10 @@ def run_deep_agent(
         if agent is None:
             model = extra.get("harness_model") or _resolve_model(settings)
             agent = _create_agent(
-                model=model, workspace=workspace, settings=settings
+                model=model,
+                workspace=workspace,
+                settings=settings,
+                tools=mcp_tools,
             )
         raw_result = agent.invoke(
             {"messages": [{"role": "user", "content": user_message}]}
@@ -367,6 +392,11 @@ def run_deep_agent(
             }
         ],
     }
+    if mcp_runtime is not None:
+        from api.app.agent.tenant_mcp import usage_as_dicts
+
+        result_extra["mcp_servers"] = list(mcp_runtime.server_summaries)
+        result_extra["mcp_usage"] = usage_as_dicts(mcp_runtime.usage)
     if include_trace:
         result_extra["orchestrator_user_prompt"] = user_message
         result_extra["plan_steps"] = [

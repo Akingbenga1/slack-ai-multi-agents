@@ -1,7 +1,7 @@
 """Host OS CLI readiness — check and optional install (control plane).
 
-Used by admin/ops endpoints only. The orchestrator never calls this; the
-executor only runs tools that are already present on PATH.
+Used by admin/ops endpoints only. The Deep Agents harness does not call
+this; it only runs tools that are already present on PATH when needed.
 """
 
 from __future__ import annotations

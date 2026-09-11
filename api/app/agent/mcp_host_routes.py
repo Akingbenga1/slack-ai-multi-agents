@@ -191,12 +191,15 @@ def check_mcp_host_server(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mcp server not found")
     cfg = row.connection_config if isinstance(row.connection_config, dict) else None
+    from api.app.db.tool_store import decrypt_mcp_server_secret
+
     result = check_mcp_server(
         server_name=row.name,
         transport=row.transport,
         connection_config=cfg,
         enabled=bool(row.enabled),
         timeout_seconds=float(settings.mcp_host_check_timeout_seconds),
+        service_token=decrypt_mcp_server_secret(row, settings),
     )
     logger.info(
         "mcp_host_check server=%s ready=%s endpoint=%s",

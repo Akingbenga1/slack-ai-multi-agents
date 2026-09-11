@@ -2,7 +2,7 @@
 
 Sprint 26: orchestration delegates to ``reply_pipeline`` (Gate → Intake →
 RunAgent → Deliver). Entitlement helpers remain here for routes/tests.
-Agent invoke goes through ``plan_and_execute`` (orchestrator → executor).
+Agent invoke goes through ``plan_and_execute`` (Deep Agents harness).
 """
 
 from __future__ import annotations

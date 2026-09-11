@@ -1,9 +1,8 @@
-"""Product Agent contract (Sprint 42).
+"""Product agent result contract.
 
-One small ABC: ``role`` + ``run(context)``. Template Method owns tenant id,
-structured logging, and an optional usage hook. Orchestrator and Executor
-differ inside ``_run_impl`` — this is not a fat ``plan()`` + ``execute()``
-interface and not a composite tree of child agents.
+``AgentResult`` is the shared outcome shape for ``plan_and_execute`` /
+harness runs. ``Agent`` + ``AgentContext`` remain as a thin Template Method
+surface for any future role adapters; the live path does not require them.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ logger = get_logger("api.agent.base")
 
 UsageHook = Callable[["AgentContext", "AgentResult"], None]
 
-# Current Agent.role for LLM prompt logging (orchestrator / executor).
+# Optional role label for LLM prompt logging when an Agent adapter runs.
 current_agent_role: ContextVar[str | None] = ContextVar(
     "current_agent_role", default=None
 )
@@ -28,7 +27,7 @@ current_agent_role: ContextVar[str | None] = ContextVar(
 
 @dataclass
 class AgentContext:
-    """Input to ``Agent.run``. Product callers pass tenant + question."""
+    """Input bag for role adapters. Product callers pass tenant + question."""
 
     client_id: str
     question: str = ""
@@ -41,7 +40,7 @@ class AgentContext:
 
 @dataclass
 class AgentResult:
-    """Output of ``Agent.run``. Role-specific details stay in ``extra``."""
+    """Output of a harness or role run. Details stay in ``extra``."""
 
     role: str
     client_id: str
@@ -51,12 +50,12 @@ class AgentResult:
 
 
 class Agent(ABC):
-    """Planner or runner (or a later role). Not a vendor ``AgentRuntime``."""
+    """Optional role adapter. Live product entry uses the harness facade."""
 
     @property
     @abstractmethod
     def role(self) -> str:
-        """Registry key, e.g. ``orchestrator`` or ``executor``."""
+        """Short role label for logs."""
 
     def run(self, context: AgentContext) -> AgentResult:
         """Template Method: require tenant → log → role work → optional usage."""
@@ -82,4 +81,4 @@ class Agent(ABC):
 
     @abstractmethod
     def _run_impl(self, context: AgentContext) -> AgentResult:
-        """Role-specific work. Base class does not plan, execute tools, or post."""
+        """Role-specific work."""

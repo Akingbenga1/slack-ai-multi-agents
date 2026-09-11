@@ -18,6 +18,8 @@ from api.app.health import run_deep_health
 from api.app.jobs.routes import router as jobs_router
 from api.app.logging_config import configure_logging, get_logger
 from api.app.middleware import TenantContextMiddleware, TenantRateLimitMiddleware
+from api.app.mcp_servers.admin_routes import router as admin_mcp_servers_router
+from api.app.mcp_servers.routes import router as mcp_servers_router
 from api.app.security import cors_allow_origins, validate_security_settings
 from api.app.settings import Settings, get_settings
 from api.app.slack.routes import router as slack_router
@@ -72,11 +74,13 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(admin_mcp_servers_router, prefix="/admin")
 app.include_router(billing_router)
 app.include_router(usage_router)
 app.include_router(agent_router)
 app.include_router(cli_host_router)
 app.include_router(mcp_host_router)
+app.include_router(mcp_servers_router)
 app.include_router(tools_router)
 app.include_router(discovery_router)
 app.include_router(jobs_router)

@@ -1,6 +1,6 @@
 """Live end-to-end check for one plain-English goal.
 
-Runs the full orchestrator -> executor -> uvx path against the real database
+Runs ``plan_and_execute`` (Deep Agents harness) against the real database
 and LLM, then reports whether the outcome was verified. Usage:
 
     python -m scripts.verify_goal_execution "<request>" [input filename ...]

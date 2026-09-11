@@ -142,12 +142,11 @@ class Settings(BaseSettings):
 
     # Sprint 46 — plan-and-execute facade behind feature flag
     plan_execute_enabled: bool = False
-    # Agent runtime: deep_agents (LangChain harness) is the product path on
-    # this branch. Legacy orchestrator/executor remain in-tree for reference
-    # until fully removed.
+    # Agent runtime: deep_agents (LangChain harness) is the product path.
     agent_runtime: str = "deep_agents"
 
-    # Executor agent LLM loop (Sprint 48)
+    # Legacy executor-loop knobs (kept for Wave 3 settings compatibility;
+    # the harness does not read most of these).
     executor_max_tool_rounds: int = 10
     # English-goal + real uvx ReAct attempts per plan step.
     # Override with EXECUTOR_UVX_MAX_ATTEMPTS when a run needs a larger budget.
@@ -187,10 +186,15 @@ class Settings(BaseSettings):
     cli_tools_enabled: bool = True
     cli_tools_timeout_seconds: int = 120
     cli_tools_max_output_bytes: int = 1_000_000
-    # Host CLI check/install control plane (not used by orchestrator/executor)
+    # Host CLI check/install control plane (not used by the harness runtime)
     cli_host_install_enabled: bool = True
     cli_host_install_timeout_seconds: int = 300
     mcp_host_check_timeout_seconds: float = 20.0
+    # MCP Connect/OAuth (remote HTTP) — redirect uses public_base_url by default
+    mcp_oauth_client_id: str = ""
+    mcp_oauth_client_secret: str = ""
+    mcp_oauth_redirect_path: str = "/mcp-servers/oauth/callback"
+    mcp_oauth_scopes: str = ""
 
     # System-wide tool discovery (not tenant-scoped)
     # CLI: portable tldr SQLite DB (relative paths resolve from project root)

@@ -1,4 +1,4 @@
-"""CLI dry-run for orchestrator → executor agent (no Slack post).
+"""CLI dry-run for the Deep Agents harness (no Slack post).
 
 Examples:
   uv run python scripts/agent_dry_run.py \

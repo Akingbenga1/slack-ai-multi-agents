@@ -121,7 +121,7 @@ def log_agent_prompts(
     client_id: str | None = None,
     model_tier: str | None = None,
 ) -> None:
-    """Append orchestrator/executor LLM system + user prompts to ``app.log``."""
+    """Append agent LLM system + user prompts to ``app.log``."""
     user_parts: list[str] = []
     for msg in messages or []:
         if not isinstance(msg, dict):

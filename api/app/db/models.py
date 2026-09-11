@@ -262,6 +262,9 @@ class McpServer(Base):
     """Connected MCP servers per tenant (Sprint 41). Not a compiled workflow."""
 
     __tablename__ = "mcp_servers"
+    __table_args__ = (
+        Index("uq_mcp_servers_tenant_name", "tenant_id", "name", unique=True),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -270,6 +273,8 @@ class McpServer(Base):
     name: Mapped[str] = mapped_column(String(255))
     transport: Mapped[str] = mapped_column(String(32))  # stdio | http
     connection_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    secret_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    oauth_secret_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

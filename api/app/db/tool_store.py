@@ -51,13 +51,19 @@ def insert_mcp_server(
     transport: str,
     connection_config: dict[str, Any] | None = None,
     enabled: bool = True,
+    secret: str | None = None,
+    settings: Settings | None = None,
 ) -> McpServer:
     tid = _tenant_uuid(tenant_id, where="insert_mcp_server")
+    secret_encrypted: str | None = None
+    if secret:
+        secret_encrypted = encrypt_bot_token(secret, settings or Settings())
     row = McpServer(
         tenant_id=tid,
         name=name,
         transport=transport,
         connection_config=connection_config,
+        secret_encrypted=secret_encrypted,
         enabled=enabled,
     )
     db.add(row)
@@ -99,6 +105,29 @@ def get_mcp_server(
             McpServer.id == UUID(str(server_id)),
         )
     )
+
+
+def decrypt_mcp_server_secret(
+    row: McpServer, settings: Settings | None = None
+) -> Optional[str]:
+    if not row.secret_encrypted:
+        return None
+    return decrypt_bot_token(row.secret_encrypted, settings or Settings())
+
+
+def delete_mcp_server(
+    db: Session,
+    *,
+    tenant_id: str | UUID | None,
+    server_id: UUID | str,
+) -> bool:
+    """Delete one mcp_servers row by tenant + id. Returns True if deleted."""
+    row = get_mcp_server(db, tenant_id=tenant_id, server_id=server_id)
+    if row is None:
+        return False
+    db.delete(row)
+    db.flush()
+    return True
 
 
 # ── Tool registry ──
@@ -206,6 +235,8 @@ def update_mcp_server(
     enabled: bool | object = _UNSET,
     connection_config: dict[str, Any] | None | object = _UNSET,
     transport: str | object = _UNSET,
+    secret: str | None | object = _UNSET,
+    settings: Settings | None = None,
 ) -> McpServer | None:
     """Update an mcp_servers row by tenant + name. Returns None if not found."""
     row = get_mcp_server_by_name(db, tenant_id=tenant_id, name=name)
@@ -217,5 +248,47 @@ def update_mcp_server(
         row.connection_config = connection_config
     if transport is not _UNSET and transport is not None:
         row.transport = str(transport)
+    if secret is not _UNSET:
+        if secret is None or secret == "":
+            row.secret_encrypted = None
+        else:
+            row.secret_encrypted = encrypt_bot_token(
+                str(secret), settings or Settings()
+            )
+    db.flush()
+    return row
+
+
+def update_mcp_server_by_id(
+    db: Session,
+    *,
+    tenant_id: str | UUID | None,
+    server_id: UUID | str,
+    name: str | object = _UNSET,
+    enabled: bool | object = _UNSET,
+    connection_config: dict[str, Any] | None | object = _UNSET,
+    transport: str | object = _UNSET,
+    secret: str | None | object = _UNSET,
+    settings: Settings | None = None,
+) -> McpServer | None:
+    """Update an mcp_servers row by tenant + id. Returns None if not found."""
+    row = get_mcp_server(db, tenant_id=tenant_id, server_id=server_id)
+    if row is None:
+        return None
+    if name is not _UNSET and name is not None:
+        row.name = str(name)
+    if enabled is not _UNSET:
+        row.enabled = bool(enabled)
+    if connection_config is not _UNSET:
+        row.connection_config = connection_config
+    if transport is not _UNSET and transport is not None:
+        row.transport = str(transport)
+    if secret is not _UNSET:
+        if secret is None or secret == "":
+            row.secret_encrypted = None
+        else:
+            row.secret_encrypted = encrypt_bot_token(
+                str(secret), settings or Settings()
+            )
     db.flush()
     return row
