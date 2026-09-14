@@ -19,7 +19,7 @@ export default async function AgentSettingsPage() {
           { label: "Agent" },
         ]} />
       <p>
-        Register CLI and MCP tools on the{" "}
+        Register CLI tools or install MCP servers on the{" "}
         <Link href="/app/tools">Tools</Link> page.
       </p>
       <div>

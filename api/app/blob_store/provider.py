@@ -66,6 +66,15 @@ class BlobStore(Protocol):
         """Normalize and validate ``key`` under the tenant; return canonical key."""
         ...
 
+    def delete(
+        self,
+        *,
+        client_id: str | None,
+        key: str,
+    ) -> None:
+        """Remove ``key`` under the tenant. Missing keys are a no-op."""
+        ...
+
 
 def get_blob_store(settings: Settings | None = None) -> BlobStore:
     """Factory: select blob adapter by ``BLOB_STORE`` (default ``local``)."""

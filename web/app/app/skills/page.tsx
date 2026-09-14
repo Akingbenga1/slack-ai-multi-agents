@@ -1,27 +1,25 @@
 import { getServerSession } from "next-auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import { CreateToolForm } from "@/components/tools/CreateToolForm";
+import { SkillsPanel } from "@/components/skills/SkillsPanel";
 import { authOptions } from "@/lib/auth";
 import { sessionTenantId } from "@/lib/tenant";
 
-export default async function OrgCreateToolPage() {
+export default async function OrgSkillsPage() {
   const session = await getServerSession(authOptions);
   const tenantId = sessionTenantId(session?.user?.tenantId);
 
   return (
     <>
       <PageHeader
-        title="New tool"
-        description="Create a CLI or HTTP tool. Install MCP servers from the Tools page."
+        title="Skills"
+        description="Create markdown skills and folders for your organisation's AI agent."
         breadcrumbs={[
           { label: "Overview", href: "/app" },
-          { label: "Tools", href: "/app/tools" },
-          { label: "New" },
+          { label: "Skills" },
         ]}
         className="mb-8"
       />
-      <CreateToolForm
-        cancelHref="/app/tools"
+      <SkillsPanel
         accessToken={session?.accessToken ?? null}
         tenantId={tenantId}
       />

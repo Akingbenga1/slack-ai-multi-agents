@@ -38,6 +38,9 @@ Rules:
 - Prefer creating new output files; do not delete or replace the user's originals.
 - When transforming an attached file, write a new artifact and leave inputs intact.
 - Use shell/python tools when needed (uvx, python, LibreOffice, etc.).
+- Tenant skills may be available via list_tenant_skills and load_tenant_skill. \
+First list the short index (name + description); load the full markdown only for \
+the one skill you need (progressive disclosure). If the user names a skill, load that.
 - Tenant MCP tools (names starting with mcp__) may be available; after seeing the \
 tool list, call only the MCP tools necessary for this request — not every tool.
 - MCP tools are available when relevant, not required for every request.
@@ -295,11 +298,27 @@ def run_deep_agent(
                 db, tenant_id=cid, run_key=run_key, settings=settings
             )
             mcp_tools = list(mcp_runtime.tools)
-            db.commit()
         finally:
             db.close()
     except Exception:
         logger.exception("tenant_mcp_runtime_failed client_id=%s", cid)
+
+    skill_runtime = None
+    skill_tools: list[Any] = []
+    try:
+        from api.app.skills.provider import build_tenant_skill_runtime
+
+        injected_provider = extra.get("skill_provider")
+        skill_runtime = build_tenant_skill_runtime(
+            client_id=cid,
+            run_key=run_key,
+            settings=settings,
+            blob_store=extra.get("blob_store"),
+            provider=injected_provider if injected_provider is not None else None,
+        )
+        skill_tools = list(skill_runtime.tools)
+    except Exception:
+        logger.exception("tenant_skill_runtime_failed client_id=%s", cid)
 
     agent = extra.get("harness_agent")
     invoke_error: str | None = None
@@ -311,7 +330,7 @@ def run_deep_agent(
                 model=model,
                 workspace=workspace,
                 settings=settings,
-                tools=mcp_tools,
+                tools=[*mcp_tools, *skill_tools],
             )
         raw_result = agent.invoke(
             {"messages": [{"role": "user", "content": user_message}]}
@@ -397,6 +416,11 @@ def run_deep_agent(
 
         result_extra["mcp_servers"] = list(mcp_runtime.server_summaries)
         result_extra["mcp_usage"] = usage_as_dicts(mcp_runtime.usage)
+    if skill_runtime is not None:
+        from api.app.skills.provider import usage_as_dicts as skill_usage_as_dicts
+
+        result_extra["skill_index_count"] = len(skill_runtime.index)
+        result_extra["skill_usage"] = skill_usage_as_dicts(skill_runtime.usage)
     if include_trace:
         result_extra["orchestrator_user_prompt"] = user_message
         result_extra["plan_steps"] = [

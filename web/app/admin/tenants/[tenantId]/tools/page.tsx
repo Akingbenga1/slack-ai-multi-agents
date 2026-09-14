@@ -1,5 +1,7 @@
+import { getServerSession } from "next-auth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { ToolsManagerPanel } from "@/components/tools/ToolsManagerPanel";
+import { authOptions } from "@/lib/auth";
 import { getMockTenantBilling } from "@/lib/mock/billing-data";
 
 type Props = {
@@ -7,6 +9,7 @@ type Props = {
 };
 
 export default async function AdminTenantToolsPage({ params }: Props) {
+  const session = await getServerSession(authOptions);
   const { tenantId } = await params;
   const tenantName = getMockTenantBilling(tenantId).tenantName;
 
@@ -14,7 +17,7 @@ export default async function AdminTenantToolsPage({ params }: Props) {
     <>
       <PageHeader
         title="Agent tools"
-        description={`Register CLI tools and MCP servers for ${tenantName}.`}
+        description={`Install and select MCP servers for ${tenantName}.`}
         breadcrumbs={[
           { label: "Overview", href: "/admin" },
           { label: "Tenants", href: "/admin/tenants" },
@@ -26,6 +29,8 @@ export default async function AdminTenantToolsPage({ params }: Props) {
       <ToolsManagerPanel
         tenantLabel={tenantName}
         createHref={`/admin/tenants/${tenantId}/tools/new`}
+        accessToken={session?.accessToken ?? null}
+        tenantId={tenantId}
       />
     </>
   );

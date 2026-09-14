@@ -17,7 +17,7 @@ export default async function AdminTenantCreateToolPage({ params }: Props) {
     <>
       <PageHeader
         title="New tool"
-        description={`Create a CLI, MCP, or HTTP request tool for ${tenantName}.`}
+        description={`Create a CLI or HTTP tool for ${tenantName}. Install MCP servers from the tenant Tools page.`}
         breadcrumbs={[
           { label: "Overview", href: "/admin" },
           { label: "Tenants", href: "/admin/tenants" },
@@ -30,6 +30,7 @@ export default async function AdminTenantCreateToolPage({ params }: Props) {
       <CreateToolForm
         cancelHref={`/admin/tenants/${tenantId}/tools`}
         tenantLabel={tenantName}
+        tenantId={tenantId}
         initialTenantId={tenantId}
         accessToken={session?.accessToken ?? null}
       />

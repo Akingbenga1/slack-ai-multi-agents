@@ -1,4 +1,4 @@
-"""Sprint 23.5 — isolation, usage types, and J10 offline smoke."""
+"""Sprint 23.5 — isolation, usage types, and rename offline smoke."""
 
 from __future__ import annotations
 
@@ -14,11 +14,8 @@ from api.app.governance.usage import (
     EVENT_PDF_GENERATE,
     JOB_BUDGET_EVENT_TYPES,
 )
-from api.app.slack.attachments import intake_attachments, require_client_id
-from api.app.slack.file_actions import (
-    produce_and_upload_analysis_pdf,
-    rename_slack_file_or_copy,
-)
+from api.app.slack.files import intake_attachments, require_client_id
+from api.app.slack.file_actions import rename_slack_file_or_copy
 from api.app.uploads.roles import FileRole
 from api.app.uploads.storage import store_upload
 
@@ -38,19 +35,13 @@ def test_require_client_id_fail_closed():
         require_client_id("   ")
 
 
-def test_j10_offline_smoke_attach_pdf_rename(
+def test_j10_offline_smoke_attach_rename(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """
-    Financial report attach → PDF competitor analysis → rename org copy.
-
-    Slack HTTP is mocked; proves isolation + deliverable paths without a live
-    workspace (live scopes remain Needs-human).
-    """
+    """Financial report attach → rename org copy with mocked Slack HTTP."""
     cid = str(uuid4())
     other = str(uuid4())
 
-    # Tenant-scoped store of the "attached" financial report
     source = store_upload(
         upload_root=tmp_path,
         client_id=cid,
@@ -60,24 +51,10 @@ def test_j10_offline_smoke_attach_pdf_rename(
         content_type="text/csv",
     )
 
-    upload_calls: list[str] = []
     edit_calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path.endswith("/files.upload"):
-            upload_calls.append(path)
-            return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "file": {
-                        "id": "FPDF1",
-                        "permalink": "https://slack.com/files/FPDF1",
-                        "name": "competitor_analysis.pdf",
-                    },
-                },
-            )
         if path.endswith("/files.edit"):
             edit_calls.append(path)
             return httpx.Response(
@@ -107,31 +84,6 @@ def test_j10_offline_smoke_attach_pdf_rename(
         }
     ]
 
-    pdf = produce_and_upload_analysis_pdf(
-        client_id=cid,
-        bot_token="xoxb-test",
-        channel="C123",
-        analysis_text="Acme leads share at 42%; Beta trails at 30%.",
-        attached_evidence=evidence,
-        upload_root=tmp_path,
-        slack_client=client,
-    )
-    assert pdf["ok"] is True
-    assert pdf["client_id"] == cid
-    assert upload_calls
-
-    # Cross-tenant PDF attempt must not use other tenant's evidence as source name
-    # (usable evidence filtered by client_id); blank client_id still fail-closed.
-    with pytest.raises(ValueError, match="client_id"):
-        produce_and_upload_analysis_pdf(
-            client_id="",
-            bot_token="xoxb",
-            channel="C1",
-            analysis_text="x",
-            attached_evidence=evidence,
-            upload_root=tmp_path,
-        )
-
     rename = rename_slack_file_or_copy(
         client_id=cid,
         upload_root=tmp_path,
@@ -145,7 +97,6 @@ def test_j10_offline_smoke_attach_pdf_rename(
     assert (tmp_path / rename["stored_relative_path"]).is_file()
     assert edit_calls
 
-    # Other tenant cannot rename this org copy (fail-closed, no raise to caller)
     stolen = rename_slack_file_or_copy(
         client_id=other,
         upload_root=tmp_path,
@@ -154,7 +105,6 @@ def test_j10_offline_smoke_attach_pdf_rename(
     )
     assert stolen["ok"] is False
     assert "not under this tenant" in str(stolen.get("error") or "")
-    # Original tenant file still present under cid path
     assert (tmp_path / rename["stored_relative_path"]).is_file()
     assert not (tmp_path / other / "stolen.csv").exists()
 

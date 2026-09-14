@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -54,10 +55,11 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def get_dry_run_file_logger() -> logging.Logger:
-    """Logger that writes only dry-run activity to project-root ``app.log``.
+    """Logger that appends selected activity lines to project-root ``app.log``.
 
-    Does not attach to the root logger, so normal API logs stay on stdout.
-    Dry-run HTTP handlers are sync in-process today (no Celery enqueue).
+    Used for dry-run request/response, agent prompts, tool-RAG phases, and
+    tenant MCP tool-usage traces. Does not attach to the root logger, so normal
+    API logs stay on stdout.
     """
     global _dry_run_file_logger
     if _dry_run_file_logger is not None:
@@ -148,30 +150,35 @@ def log_agent_prompts(
         handler.flush()
 
 
-def log_tool_rag_activity(
+def log_mcp_usage(
     *,
-    phase: str,
-    client_id: str | None = None,
-    **fields: Any,
+    tenant_id: str,
+    run_key: str,
+    server_name: str,
+    tool_name: str,
+    ok: bool,
+    detail: str | None = None,
+    step: str = "tool_call",
 ) -> None:
-    """Append one Tool RAG pipeline event to project-root ``app.log``.
+    """Append one tenant MCP tool-usage event to project-root ``app.log``.
 
-    Phases follow filter → retrieve → shortlist → plan → lazy_load.
+    Records which tenant used which remote MCP tool and when (UTC), without
+    secrets or tool payloads.
     """
+    used_at = datetime.now(timezone.utc).isoformat()
     payload: dict[str, Any] = {
-        "kind": "tool_rag",
-        "phase": (phase or "").strip() or "unknown",
-        "client_id": str(client_id or get_client_id() or "-"),
+        "kind": "mcp_usage",
+        "tenant_id": str(tenant_id or "-"),
+        "client_id": str(get_client_id() or tenant_id or "-"),
+        "run_key": str(run_key or "-"),
+        "server_name": str(server_name or "-"),
+        "tool_name": str(tool_name or "-"),
+        "step": str(step or "tool_call"),
+        "ok": bool(ok),
+        "used_at": used_at,
     }
-    reserved = {"kind", "phase", "client_id"}
-    for key, value in fields.items():
-        if value is None:
-            continue
-        # Avoid clobbering the event kind with tool kind=mcp|cli|code.
-        field_key = "tool_kind" if key == "kind" else key
-        if field_key in reserved:
-            continue
-        payload[field_key] = value
+    if detail:
+        payload["detail"] = str(detail)[:500]
     log = get_dry_run_file_logger()
     log.info("%s", json.dumps(payload, default=str))
     for handler in log.handlers:

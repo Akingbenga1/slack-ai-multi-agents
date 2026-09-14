@@ -1,7 +1,7 @@
-"""MCP server readiness — probe registered servers (control plane).
+"""MCP connection helpers — readiness probe and live tool calls.
 
-Used by admin/ops endpoints only. The Deep Agents harness does not call
-this; it only uses servers that are already reachable when needed.
+Used by tenant ``/mcp-servers`` verify and Deep Agents runtime
+(``tenant_mcp``). Control-plane probes stay separate from user work.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import asyncio
 import concurrent.futures
 import os
 import shutil
-import sys
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -143,6 +142,18 @@ def _split_tool_defs(defs: list[dict[str, Any]]) -> tuple[list[str], list[dict[s
     return names, trimmed
 
 
+def _httpx_mcp_client(
+    *,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+) -> Any:
+    """Build an httpx client for streamable HTTP MCP (headers + timeouts)."""
+    import httpx
+
+    timeout_cfg = httpx.Timeout(timeout, connect=min(10.0, timeout))
+    return httpx.AsyncClient(headers=headers or None, timeout=timeout_cfg)
+
+
 async def _list_tools_http(
     url: str,
     *,
@@ -152,25 +163,28 @@ async def _list_tools_http(
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
-    async with streamable_http_client(url, headers=headers, timeout=timeout) as (
-        read,
-        write,
-        _get_session_id,
-    ):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            listed = await session.list_tools()
-            out: list[dict[str, Any]] = []
-            for t in listed.tools or []:
-                schema = getattr(t, "inputSchema", None) or getattr(t, "input_schema", None)
-                out.append(
-                    {
-                        "name": t.name,
-                        "description": getattr(t, "description", None) or "",
-                        "inputSchema": schema if isinstance(schema, dict) else {},
-                    }
-                )
-            return out
+    async with _httpx_mcp_client(timeout=timeout, headers=headers) as http_client:
+        async with streamable_http_client(url, http_client=http_client) as (
+            read,
+            write,
+            _get_session_id,
+        ):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                listed = await session.list_tools()
+                out: list[dict[str, Any]] = []
+                for t in listed.tools or []:
+                    schema = getattr(t, "inputSchema", None) or getattr(
+                        t, "input_schema", None
+                    )
+                    out.append(
+                        {
+                            "name": t.name,
+                            "description": getattr(t, "description", None) or "",
+                            "inputSchema": schema if isinstance(schema, dict) else {},
+                        }
+                    )
+                return out
 
 
 async def _list_tools_stdio(
@@ -449,14 +463,15 @@ async def _call_tool_http(
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
-    async with streamable_http_client(url, headers=headers, timeout=timeout) as (
-        read,
-        write,
-        _get_session_id,
-    ):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            return await session.call_tool(name, arguments)
+    async with _httpx_mcp_client(timeout=timeout, headers=headers) as http_client:
+        async with streamable_http_client(url, http_client=http_client) as (
+            read,
+            write,
+            _get_session_id,
+        ):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool(name, arguments)
 
 
 async def _call_tool_stdio(
@@ -573,68 +588,3 @@ def call_registered_mcp_tool(
         f"unsupported MCP transport: {transport_norm!r}",
         code="unsupported_transport",
     )
-
-
-def check_bundled_mcp(*, timeout_seconds: float = 20.0) -> McpCheckResult:
-    """Probe the process-local / settings-backed bundled MCP used by the agent."""
-    timeout = max(1.0, float(timeout_seconds))
-
-    async def _probe() -> list[str]:
-        from mcp import ClientSession
-        from mcp.client.stdio import stdio_client
-
-        from api.app.agent.mcp_client import (
-            _in_process_server,
-            _mcp_transport,
-            mcp_server_params,
-        )
-        from api.app.settings import get_settings
-
-        settings = get_settings()
-        transport = _mcp_transport(settings)
-        if transport in ("in_process", "inprocess", "local"):
-            app = _in_process_server()
-            listed = await app.list_tools()
-            names: list[str] = []
-            for item in listed or []:
-                name = getattr(item, "name", None)
-                if name:
-                    names.append(str(name))
-                elif isinstance(item, dict) and item.get("name"):
-                    names.append(str(item["name"]))
-            return names
-
-        params = mcp_server_params(settings)
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                return [t.name for t in (result.tools or [])]
-
-    try:
-        names = _run_async(_probe(), timeout=timeout)
-        trimmed = names[:50]
-        return McpCheckResult(
-            server_name="__bundled__",
-            transport="bundled",
-            ready=True,
-            enabled=True,
-            endpoint=sys.executable,
-            tool_count=len(names),
-            tool_names=trimmed,
-            tool_defs=[{"name": n, "description": "", "inputSchema": {}} for n in trimmed],
-            error=None,
-            detail=f"bundled MCP ready · {len(names)} tool(s)",
-        )
-    except Exception as exc:  # noqa: BLE001
-        return McpCheckResult(
-            server_name="__bundled__",
-            transport="bundled",
-            ready=False,
-            enabled=True,
-            endpoint=sys.executable,
-            tool_count=None,
-            tool_names=[],
-            error=f"bundled MCP probe failed: {exc}",
-            detail=str(exc)[:400],
-        )

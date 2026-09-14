@@ -23,7 +23,7 @@ Optional: say how long the answer should be ("3 bullets" or "one paragraph").
 
 ## Steps (for the agent)
 
-1. **Read the file** — Open the uploaded document only. Do not search the internet or Slack.
+1. **Read the file** — Open the document provided only. Do not search the internet or Slack.
 2. **Understand the request** — Restate what kind of summary they asked for. If the file is missing or unreadable, say so and stop.
 3. **Write the summary** — In plain English, include:
   - **Overview** (2–3 sentences: what the document is about)
@@ -36,7 +36,7 @@ Optional: say how long the answer should be ("3 bullets" or "one paragraph").
 
 ## Rules
 
-- Use **only** the uploaded file. Do not guess content that is not in the document.
+- Use **only** the file. Do not guess content that is not in the document.
 - If something is unclear in the file, say "The document does not say" instead of inventing an answer.
 - Keep language simple — no jargon unless the document requires it, then explain it briefly.
 - Stay under 300 words unless they asked for more detail.

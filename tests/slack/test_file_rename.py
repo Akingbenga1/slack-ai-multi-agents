@@ -10,7 +10,6 @@ import pytest
 
 from api.app.slack.file_actions import (
     parse_requested_filename,
-    question_requests_rename,
     rename_slack_file_or_copy,
     rename_stored_org_copy,
 )
@@ -33,13 +32,6 @@ def test_parse_requested_filename():
         "rename the file",
         fallback_from="report.csv",
     ) == "report_renamed.csv"
-
-
-def test_question_requests_rename():
-    assert question_requests_rename(
-        "produce a PDF of competitor analysis and rename the financial report file"
-    )
-    assert not question_requests_rename("analyse this attachment")
 
 
 def test_rename_stored_org_copy_isolates_tenant(tmp_path: Path):

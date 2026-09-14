@@ -12,7 +12,7 @@ export default async function OrgToolsPage() {
     <>
       <PageHeader
         title="Tools"
-        description="Register CLI tools and MCP servers for your organisation's AI agent."
+        description="Install and select MCP servers for your organisation's AI agent."
         breadcrumbs={[
           { label: "Overview", href: "/app" },
           { label: "Tools" },

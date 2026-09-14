@@ -13,7 +13,6 @@ import {
   IconBilling,
   IconCliHost,
   IconHealth,
-  IconMcpHost,
   IconTenants,
   IconTools,
 } from "@/components/dashboard/icons";
@@ -59,11 +58,6 @@ const QUICK_LINKS = [
     href: "/admin/cli-host",
     title: "CLI host",
     icon: IconCliHost,
-  },
-  {
-    href: "/admin/mcp-host",
-    title: "MCP host",
-    icon: IconMcpHost,
   },
   {
     href: "/admin/agent-trace",

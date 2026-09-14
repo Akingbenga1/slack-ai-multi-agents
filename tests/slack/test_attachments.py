@@ -8,7 +8,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from api.app.slack.attachments import (
+from api.app.slack.files import (
     evidence_to_chunks,
     files_from_event,
     intake_attachments,

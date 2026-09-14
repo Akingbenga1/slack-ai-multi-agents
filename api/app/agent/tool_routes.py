@@ -1,7 +1,7 @@
 """CRUD API for the tool_registry table (tenant-scoped).
 
-All tools the product can register live in the DB.
-No hardcoded tool sets — adding or removing a tool is a DB operation.
+CLI/HTTP/code tools live here. Tenant MCP servers are installed via
+``/mcp-servers`` — not nested under tool create.
 """
 
 from __future__ import annotations
@@ -18,9 +18,7 @@ from api.app.auth.tenant_resolve import resolve_tenant_uuid_for_principal
 from api.app.auth.tokens import AuthPrincipal
 from api.app.db.tool_store import (
     delete_tool_registry,
-    get_mcp_server_by_name,
     get_tool_registry,
-    insert_mcp_server,
     insert_tool_registry,
     list_tool_registry,
     update_tool_registry,
@@ -33,28 +31,16 @@ logger = get_logger("api.agent.tool_routes")
 router = APIRouter(prefix="/tools", tags=["tools"])
 
 
-class McpServerCreatePayload(BaseModel):
-    """Optional nested payload so Create can register server + tool together."""
-
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    transport: str = Field(default="http", min_length=1, max_length=32)
-    connection_config: Optional[dict[str, Any]] = None
-    enabled: bool = True
-
-
 class ToolCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    kind: str = Field(..., pattern=r"^(mcp|cli|http|code)$")
+    kind: str = Field(..., pattern=r"^(cli|http|code)$")
     description: Optional[str] = None
-    mcp_server_id: Optional[UUID] = None
     config: Optional[dict[str, Any]] = None
-    # When kind=mcp, create/reuse an mcp_servers row in the same request.
-    mcp_server: Optional[McpServerCreatePayload] = None
 
 
 class ToolUpdate(BaseModel):
     description: Optional[str] = None
-    kind: Optional[str] = Field(default=None, pattern=r"^(mcp|cli|http|code)$")
+    kind: Optional[str] = Field(default=None, pattern=r"^(cli|http|code|mcp)$")
     config: Optional[dict[str, Any]] = None
 
 
@@ -113,25 +99,15 @@ def get_tool(
     return _to_response(row)
 
 
-def _normalize_mcp_transport(raw: str) -> str:
-    t = (raw or "").strip().lower()
-    if t in {"http", "streamable-http", "sse", "websocket"}:
-        return "http"
-    if t in {"stdio", "std-io", "standard-io"}:
-        return "stdio"
-    return t or "http"
-
-
 @router.post("", response_model=ToolResponse, status_code=status.HTTP_201_CREATED)
 def create_tool(
     body: ToolCreate,
     principal: Annotated[AuthPrincipal, Depends(require_tenant_access)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ToolResponse:
-    """Register a new tool for the tenant.
+    """Register a new CLI/HTTP/code tool for the tenant.
 
-    For ``kind=mcp``, callers may pass ``mcp_server`` to create/reuse the
-    linked ``mcp_servers`` row in the same transaction.
+    MCP servers are installed via ``POST /mcp-servers``, not this endpoint.
     """
     tid = _require_client_uuid(principal)
     existing = get_tool_registry(db, tenant_id=str(tid), name=body.name)
@@ -141,39 +117,13 @@ def create_tool(
             detail=f"tool {body.name!r} already exists",
         )
 
-    mcp_server_id = body.mcp_server_id
-    if body.kind == "mcp" and body.mcp_server is not None:
-        server_name = (body.mcp_server.name or body.name).strip()
-        if not server_name:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="mcp_server.name is required when creating an MCP tool",
-            )
-        transport = _normalize_mcp_transport(body.mcp_server.transport)
-        server = get_mcp_server_by_name(db, tenant_id=str(tid), name=server_name)
-        if server is None:
-            server = insert_mcp_server(
-                db,
-                tenant_id=str(tid),
-                name=server_name,
-                transport=transport,
-                connection_config=body.mcp_server.connection_config,
-                enabled=body.mcp_server.enabled,
-            )
-        mcp_server_id = server.id
-    elif body.kind == "mcp" and mcp_server_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="mcp tools require mcp_server_id or mcp_server payload",
-        )
-
     row = insert_tool_registry(
         db,
         tenant_id=str(tid),
         name=body.name,
         kind=body.kind,
         description=body.description,
-        mcp_server_id=mcp_server_id,
+        mcp_server_id=None,
         config=body.config,
     )
     db.commit()
@@ -215,4 +165,3 @@ def delete_tool(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tool not found")
     db.commit()
-

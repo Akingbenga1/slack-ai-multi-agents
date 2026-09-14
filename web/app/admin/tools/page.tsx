@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import { PlatformToolsOverviewPanel } from "@/components/tools/PlatformToolsOverviewPanel";
 import { buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export default function AdminToolsPage() {
@@ -10,7 +16,7 @@ export default function AdminToolsPage() {
     <>
       <PageHeader
         title="Tools"
-        description="Cross-tenant tool and MCP server registry — per-tenant CLI and MCP configuration."
+        description="Open a tenant to manage that organisation's MCP installs. Platform-wide MCP registry UI is not the near-term product surface."
         breadcrumbs={[
           { label: "Overview", href: "/admin" },
           { label: "Tools" },
@@ -24,12 +30,6 @@ export default function AdminToolsPage() {
               CLI host
             </Link>
             <Link
-              href="/admin/mcp-host"
-              className={cn(buttonVariants({ variant: "secondary" }))}
-            >
-              MCP host
-            </Link>
-            <Link
               href="/admin/tools/new"
               className={cn(buttonVariants({ variant: "default" }), "rounded-full")}
             >
@@ -40,7 +40,23 @@ export default function AdminToolsPage() {
         }
         className="mb-8"
       />
-      <PlatformToolsOverviewPanel />
+      <Card>
+        <CardHeader className="border-b border-border">
+          <CardTitle className="text-headline-md">Tenant MCP installs</CardTitle>
+          <CardDescription className="mt-1">
+            Choose a tenant, then use its Tools page for named MCP connections
+            (URL, Bearer, Connect, Available).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <Link
+            href="/admin/tenants"
+            className={cn(buttonVariants({ variant: "default" }), "rounded-full")}
+          >
+            Open tenants
+          </Link>
+        </CardContent>
+      </Card>
     </>
   );
 }

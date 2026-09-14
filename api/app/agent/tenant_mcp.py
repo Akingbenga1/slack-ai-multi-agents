@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from api.app.agent.mcp_host import call_registered_mcp_tool, check_mcp_server
 from api.app.db.tool_store import decrypt_mcp_server_secret, list_mcp_servers
-from api.app.logging_config import get_logger
+from api.app.logging_config import get_logger, log_mcp_usage
 from api.app.mcp_servers.oauth import access_token_for_mcp_server
 from api.app.settings import Settings, get_settings
 
@@ -137,9 +137,14 @@ def build_tenant_mcp_runtime(
             if schema:
                 description = f"{description} inputSchema={json.dumps(schema)[:800]}"
 
+            # Snapshot ORM fields before the session closes; tool calls run later.
+            server_name = str(row.name)
+            transport = str(row.transport or "http")
+
             def _make_caller(
                 *,
-                server_row=row,
+                bound_server=server_name,
+                bound_transport=transport,
                 remote_tool=tool_name,
                 bound_token=token,
                 bound_conn=conn,
@@ -148,8 +153,8 @@ def build_tenant_mcp_runtime(
                     payload = _normalize_arguments(arguments)
                     try:
                         raw = call_registered_mcp_tool(
-                            server_name=server_row.name,
-                            transport=server_row.transport,
+                            server_name=bound_server,
+                            transport=bound_transport,
                             connection_config=bound_conn,
                             enabled=True,
                             tool_name=remote_tool,
@@ -163,7 +168,7 @@ def build_tenant_mcp_runtime(
                             McpUsageEvent(
                                 tenant_id=tid,
                                 run_key=run_key,
-                                server_name=server_row.name,
+                                server_name=bound_server,
                                 tool_name=remote_tool,
                                 step="tool_call",
                                 ok=True,
@@ -173,8 +178,15 @@ def build_tenant_mcp_runtime(
                             "mcp_usage tenant=%s run_key=%s server=%s tool=%s",
                             tid,
                             run_key,
-                            server_row.name,
+                            bound_server,
                             remote_tool,
+                        )
+                        log_mcp_usage(
+                            tenant_id=tid,
+                            run_key=run_key,
+                            server_name=bound_server,
+                            tool_name=remote_tool,
+                            ok=True,
                         )
                         return str(raw)
                     except Exception as exc:
@@ -182,7 +194,7 @@ def build_tenant_mcp_runtime(
                             McpUsageEvent(
                                 tenant_id=tid,
                                 run_key=run_key,
-                                server_name=server_row.name,
+                                server_name=bound_server,
                                 tool_name=remote_tool,
                                 step="tool_call",
                                 ok=False,
@@ -193,9 +205,17 @@ def build_tenant_mcp_runtime(
                             "mcp_usage_failed tenant=%s run_key=%s server=%s tool=%s err=%s",
                             tid,
                             run_key,
-                            server_row.name,
+                            bound_server,
                             remote_tool,
                             exc,
+                        )
+                        log_mcp_usage(
+                            tenant_id=tid,
+                            run_key=run_key,
+                            server_name=bound_server,
+                            tool_name=remote_tool,
+                            ok=False,
+                            detail=str(exc),
                         )
                         return f"MCP tool error: {exc}"
 

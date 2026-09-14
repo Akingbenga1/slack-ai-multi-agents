@@ -8,7 +8,6 @@ import {
   IconDashboard,
   IconExternal,
   IconHealth,
-  IconMcpHost,
   IconTenants,
   IconTools,
 } from "./icons";
@@ -47,14 +46,7 @@ const ADMIN_ITEMS: SidebarItem[] = [
     label: "Tools",
     icon: <IconTools size={20} />,
     isActive: (pathname) =>
-      pathname.startsWith("/admin/tools") ||
-      (pathname.includes("/tools") && !pathname.startsWith("/admin/mcp-host")),
-  },
-  {
-    href: "/admin/mcp-host",
-    label: "MCP host",
-    icon: <IconMcpHost size={20} />,
-    isActive: (pathname) => pathname.startsWith("/admin/mcp-host"),
+      pathname.startsWith("/admin/tools") || pathname.includes("/tools"),
   },
   {
     href: "/admin/agent-trace",

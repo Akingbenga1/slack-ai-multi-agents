@@ -76,39 +76,13 @@ class Settings(BaseSettings):
     anthropic_model_haiku: str = "claude-3-5-haiku-latest"
     anthropic_model_sonnet: str = "claude-sonnet-4-20250514"
     anthropic_max_tokens: int = 1024
-    orchestrator_max_tokens: int = 4096
-    # Executor ReAct writes code; it needs more output headroom than the
-    # planner. This is the visible/tool-call budget. Thinking, when enabled,
-    # is reserved separately so a long reason cannot eat the script.
-    executor_max_tokens: int = 8192
-    executor_thinking_tokens: int = 4096
-    # Tool RAG — planner shortlist size (clamped 5–20 in tool_rag)
-    tool_rag_top_k: int = 12
-    tool_rag_use_embeddings: bool = True
-    tool_rag_workflow_body_chars: int = 1500
     # Ollama / OpenAI-compatible adapter (base URL + tier tags)
     ollama_url: str = "http://localhost:11434"
     ollama_model_fast: str = "llama3.2"
     ollama_model_capable: str = "llama3.1"
     ollama_max_tokens: int = 1024
-    agent_retrieve_top_k: int = 8
-    # Drop weak neighbors below this cosine score (hard hedge when none remain)
-    agent_min_score: float = 0.70
-    # memory | postgres — Postgres tables created via checkpointer.setup()
-    agent_checkpointer: str = "postgres"
-    # mcp | direct — tools node default is MCP client; direct = in-process retrieval
-    agent_retrieve_backend: str = "mcp"
-    # in_process (API/worker default) | stdio (external / Inspector-style)
-    agent_mcp_transport: str = "in_process"
-    # Optional override for stdio MCP launch (default: current python -m mcp_server)
-    agent_mcp_command: str = ""
-    agent_mcp_args: str = ""
-    # Hard deadline for one MCP tool call (in-process or stdio)
+    # Hard deadline for one MCP tool call
     agent_mcp_timeout_seconds: float = 60.0
-    # Cap retrieve/tool top-k to bound Qdrant payload memory
-    agent_retrieve_max_top_k: int = 32
-    # Keep at most this many checkpointed messages per thread (human+AI turns)
-    agent_max_checkpoint_messages: int = 40
 
     # Slack (Sprint 4+)
     slack_client_id: str = ""
@@ -140,47 +114,11 @@ class Settings(BaseSettings):
     # When false, Redis errors deny requests instead of failing open
     rate_limit_fail_open: bool = True
 
-    # Sprint 46 — plan-and-execute facade behind feature flag
-    plan_execute_enabled: bool = False
-    # Agent runtime: deep_agents (LangChain harness) is the product path.
-    agent_runtime: str = "deep_agents"
-
-    # Legacy executor-loop knobs (kept for Wave 3 settings compatibility;
-    # the harness does not read most of these).
-    executor_max_tool_rounds: int = 10
-    # English-goal + real uvx ReAct attempts per plan step.
-    # Override with EXECUTOR_UVX_MAX_ATTEMPTS when a run needs a larger budget.
-    executor_uvx_max_attempts: int = 12
-    # Empty completions (no text, no tool calls) get a separate continuation
-    # budget so they do not consume delivering tool attempts.
-    executor_empty_continuations: int = 2
-    # Wall-clock ceiling for one plan step's ReAct loop, independent of the
-    # action budget, so a step cannot run indefinitely on slow tool installs.
-    executor_step_timeout_seconds: float = 900.0
-    # Consecutive failed actions tolerated before one structured reflection
-    # turn is injected to force a strategy change instead of blind retries.
-    executor_reflect_after_failures: int = 3
-    # Identical repeated actions tolerated before the loop stops for stalling.
-    executor_max_repeated_actions: int = 2
-    # Calls that never reached an instrument (empty script, bad args).
-    # Separate from the repeat budget so they cannot look like a real try.
-    executor_max_malformed_actions: int = 3
-    # Per-observation stdout/stderr budget kept in the model transcript; the
-    # full text is still recorded on the step result for tracing.
-    executor_observation_chars: int = 4000
-
     # Agent run workspaces (isolated per plan step; inputs copied in, never
     # mutated in place). Relative paths resolve from the project root.
     agent_workspace_root: str = "data/workspaces"
     # Retain workspace directories after a run for debugging and trace replay.
     agent_workspace_keep: bool = True
-    # Libraries the model may inject into `uvx --with … python`. Empty means
-    # any validly-named PyPI distribution is allowed.
-    agent_python_libs_allowlist: str = ""
-    # Cap on libraries injected into a single run_python action.
-    agent_python_max_libs: int = 8
-    # Drop secret-looking variables from the child process environment.
-    executor_scrub_child_env: bool = True
 
     # CLI tool execution (Sprint 47)
     cli_tools_enabled: bool = True
@@ -202,8 +140,6 @@ class Settings(BaseSettings):
     discovery_cli_search_limit: int = 15
     # Celery Beat interval for upstream tldr → SQLite refresh (default weekly)
     discovery_cli_update_interval_seconds: float = 604800.0
-    # Deprecated / unused for CLI (kept so old .env keys do not break Settings)
-    discovery_cli_service_url: str = ""
     # Official MCP Registry base URL — set via DISCOVERY_MCP_SERVICE_URL (no code default)
     discovery_mcp_service_url: str = ""
     # Reserved for a future HTTP-tools discovery route

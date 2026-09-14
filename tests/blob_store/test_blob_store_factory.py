@@ -40,6 +40,10 @@ def test_local_put_get_rename_roundtrip(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         store.get(client_id=cid, key=key)
 
+    store.delete(client_id=cid, key=new_key)
+    with pytest.raises(FileNotFoundError):
+        store.get(client_id=cid, key=new_key)
+
 
 def test_local_missing_client_id_raises(tmp_path: Path):
     store = LocalDiskBlobStore(root=tmp_path)

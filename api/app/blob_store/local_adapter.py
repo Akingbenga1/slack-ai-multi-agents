@@ -97,6 +97,18 @@ class LocalDiskBlobStore:
         resolve_local_blob_path(self.root, rel, client_id=cid)
         return rel
 
+    def delete(
+        self,
+        *,
+        client_id: str | None,
+        key: str,
+    ) -> None:
+        cid = _require_client_id(client_id)
+        canonical = self.resolve(client_id=cid, key=key)
+        path = resolve_local_blob_path(self.root, canonical, client_id=cid)
+        if path.is_file():
+            path.unlink()
+
 
 def _require_client_id(client_id: str | None) -> str:
     cid = str(client_id or "").strip()

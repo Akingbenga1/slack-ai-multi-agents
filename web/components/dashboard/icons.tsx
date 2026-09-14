@@ -106,6 +106,17 @@ export function IconKnowledge({ className, size }: IconProps) {
   );
 }
 
+export function IconSkills({ className, size }: IconProps) {
+  return (
+    <svg {...base({ className, size })} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M8 7h8" />
+      <path d="M8 11h5" />
+    </svg>
+  );
+}
+
 export function IconWorkflows({ className, size }: IconProps) {
   return (
     <svg {...base({ className, size })} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
@@ -169,15 +180,6 @@ export function IconCliHost({ className, size }: IconProps) {
       <rect x="3" y="4" width="18" height="14" rx="2" />
       <path d="M7 9l3 3-3 3" />
       <line x1="12" y1="15" x2="17" y2="15" />
-    </svg>
-  );
-}
-
-export function IconMcpHost({ className, size }: IconProps) {
-  return (
-    <svg {...base({ className, size })} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
     </svg>
   );
 }

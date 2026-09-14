@@ -4,7 +4,6 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.app.agent.cli_host_routes import router as cli_host_router
-from api.app.agent.mcp_host_routes import router as mcp_host_router
 from api.app.agent.routes import router as agent_router
 from api.app.agent.tool_routes import router as tools_router
 from api.app.admin.routes import router as admin_router
@@ -28,6 +27,7 @@ from api.app.ingestion.routes import router as ingestion_router
 from api.app.uploads.routes import router as uploads_router
 from api.app.workflows.routes import router as workflows_router
 from api.app.tenant_files.routes import router as tenant_files_router
+from api.app.skills.routes import router as skills_router
 
 configure_logging()
 logger = get_logger("api")
@@ -79,7 +79,6 @@ app.include_router(billing_router)
 app.include_router(usage_router)
 app.include_router(agent_router)
 app.include_router(cli_host_router)
-app.include_router(mcp_host_router)
 app.include_router(mcp_servers_router)
 app.include_router(tools_router)
 app.include_router(discovery_router)
@@ -89,6 +88,7 @@ app.include_router(uploads_router)
 app.include_router(ingestion_router)
 app.include_router(workflows_router)
 app.include_router(tenant_files_router)
+app.include_router(skills_router)
 
 
 @app.get("/health")

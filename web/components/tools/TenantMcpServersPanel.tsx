@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Plus, RefreshCw, Server, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import {
   checkMcpServer,
   createMcpServer,
@@ -32,6 +32,15 @@ type Props = {
 const inputClassName =
   "w-full rounded-lg border border-border bg-card px-3 py-2 text-body-md text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
+function readinessNote(
+  row: McpServerRecord,
+  verifyRequested: boolean,
+): string {
+  if (row.readiness?.ready === true) return " Ready.";
+  if (row.readiness?.error) return ` Saved; readiness: ${row.readiness.error}`;
+  return verifyRequested ? " Saved." : " Saved without verify.";
+}
+
 export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
   const [servers, setServers] = useState<McpServerRecord[] | null | undefined>(
     undefined,
@@ -47,6 +56,13 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
   const [serviceToken, setServiceToken] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [verifyOnSave, setVerifyOnSave] = useState(true);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editServiceToken, setEditServiceToken] = useState("");
+  const [clearServiceToken, setClearServiceToken] = useState(false);
+  const [editVerifyOnSave, setEditVerifyOnSave] = useState(true);
 
   const reload = useCallback(async () => {
     if (!accessToken) {
@@ -80,6 +96,36 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
     setShowForm(false);
   }
 
+  function resetEditForm() {
+    setEditingId(null);
+    setEditName("");
+    setEditUrl("");
+    setEditServiceToken("");
+    setClearServiceToken(false);
+    setEditVerifyOnSave(true);
+  }
+
+  function beginEdit(server: McpServerRecord) {
+    resetForm();
+    setEditingId(server.id);
+    setEditName(server.name);
+    setEditUrl(server.url || "");
+    setEditServiceToken("");
+    setClearServiceToken(false);
+    setEditVerifyOnSave(true);
+    setError(null);
+    setMessage(null);
+  }
+
+  function upsertServer(row: McpServerRecord) {
+    setServers((prev) => {
+      const rest = (prev || []).filter((s) => s.id !== row.id);
+      return [row, ...rest].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+      );
+    });
+  }
+
   async function onCreate(ev: FormEvent) {
     ev.preventDefault();
     if (!accessToken) return;
@@ -97,26 +143,46 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
         enabled,
         verify: verifyOnSave,
       });
-      setServers((prev) => {
-        const rest = (prev || []).filter((s) => s.id !== row.id);
-        return [row, ...rest].sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-        );
-      });
-      const readyNote =
-        row.readiness?.ready === true
-          ? " Ready."
-          : row.readiness?.error
-            ? ` Saved; readiness: ${row.readiness.error}`
-            : verifyOnSave
-              ? " Saved."
-              : " Saved without verify.";
-      setMessage(`Added MCP server "${row.name}".${readyNote}`);
+      upsertServer(row);
+      setMessage(`Added MCP server "${row.name}".${readinessNote(row, verifyOnSave)}`);
       resetForm();
     } catch (err) {
       setError(mcpApiErrorMessage(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onUpdate(ev: FormEvent) {
+    ev.preventDefault();
+    if (!accessToken || !editingId) return;
+    const cleanName = editName.trim();
+    const cleanUrl = editUrl.trim();
+    if (!cleanName || !cleanUrl) return;
+    setRowBusy(editingId);
+    setError(null);
+    setMessage(null);
+    try {
+      const token = editServiceToken.trim();
+      const row = await updateMcpServer(accessToken, tenantId, editingId, {
+        name: cleanName,
+        url: cleanUrl,
+        verify: editVerifyOnSave,
+        ...(clearServiceToken
+          ? { clear_service_token: true }
+          : token
+            ? { service_token: token }
+            : {}),
+      });
+      upsertServer(row);
+      setMessage(
+        `Updated MCP server "${row.name}".${readinessNote(row, editVerifyOnSave)}`,
+      );
+      resetEditForm();
+    } catch (err) {
+      setError(mcpApiErrorMessage(err));
+    } finally {
+      setRowBusy(null);
     }
   }
 
@@ -190,6 +256,7 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
     try {
       await deleteMcpServer(accessToken, tenantId, server.id);
       setServers((prev) => (prev || []).filter((s) => s.id !== server.id));
+      if (editingId === server.id) resetEditForm();
       setMessage(`Removed MCP server "${server.name}".`);
     } catch (err) {
       setError(mcpApiErrorMessage(err));
@@ -212,6 +279,10 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
   }
 
   const list = servers ?? [];
+  const editingServer =
+    editingId != null
+      ? (list.find((s) => s.id === editingId) ?? null)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -222,9 +293,9 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
               <CardTitle className="text-headline-md">MCP servers</CardTitle>
               <CardDescription className="mt-1">
                 Named remote connections (display name + URL). Optional Bearer
-                service token for authenticated remotes. Select Available so
-                Deep Agents may use them when relevant. Connect/OAuth comes
-                next.
+                service token for authenticated remotes. Use Connect for
+                OAuth-class remotes. Select Available so Deep Agents may use
+                them when relevant.
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -241,7 +312,10 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
               <Button
                 type="button"
                 className="rounded-full"
-                onClick={() => setShowForm((open) => !open)}
+                onClick={() => {
+                  resetEditForm();
+                  setShowForm((open) => !open);
+                }}
               >
                 <Plus className="h-4 w-4" />
                 {showForm ? "Cancel" : "Add MCP server"}
@@ -358,6 +432,112 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
         </Card>
       ) : null}
 
+      {editingServer ? (
+        <Card>
+          <CardHeader className="border-b border-border">
+            <CardTitle className="text-headline-md">
+              Edit MCP server
+            </CardTitle>
+            <CardDescription>
+              Update display name or remote URL. Leave service token blank to
+              keep the stored credential; secrets are never shown again.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <form
+              onSubmit={(ev) => void onUpdate(ev)}
+              className="grid max-w-2xl gap-4"
+            >
+              <label className="block">
+                <span className="text-sm font-medium text-foreground">
+                  Display name
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  Unique per organisation — letters, numbers, _ and -
+                </span>
+                <input
+                  value={editName}
+                  onChange={(ev) => setEditName(ev.target.value)}
+                  required
+                  pattern="[A-Za-z0-9_-]+"
+                  className={cn(inputClassName, "mt-2")}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-foreground">
+                  Remote URL
+                </span>
+                <input
+                  type="url"
+                  value={editUrl}
+                  onChange={(ev) => setEditUrl(ev.target.value)}
+                  placeholder="https://mcp.example.com/mcp"
+                  required
+                  className={cn(inputClassName, "mt-2 font-mono text-[13px]")}
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium text-foreground">
+                  New service token (optional)
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  {editingServer.has_service_credential
+                    ? "Bearer credential is stored. Enter a new token to replace it."
+                    : "Optional Bearer credential for token-style remotes."}
+                </span>
+                <input
+                  type="password"
+                  value={editServiceToken}
+                  onChange={(ev) => {
+                    setEditServiceToken(ev.target.value);
+                    if (ev.target.value.trim()) setClearServiceToken(false);
+                  }}
+                  disabled={clearServiceToken}
+                  autoComplete="off"
+                  className={cn(inputClassName, "mt-2 font-mono text-[13px]")}
+                />
+              </label>
+              {editingServer.has_service_credential ? (
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={clearServiceToken}
+                    onChange={(ev) => {
+                      setClearServiceToken(ev.target.checked);
+                      if (ev.target.checked) setEditServiceToken("");
+                    }}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  Remove stored Bearer credential
+                </label>
+              ) : null}
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={editVerifyOnSave}
+                  onChange={(ev) => setEditVerifyOnSave(ev.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Verify readiness on save
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="submit"
+                  className="rounded-full"
+                  disabled={rowBusy === editingServer.id}
+                >
+                  <Server className="h-4 w-4" />
+                  Save changes
+                </Button>
+                <Button type="button" variant="ghost" onClick={resetEditForm}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-6 py-5">
           <div>
@@ -452,6 +632,16 @@ export function TenantMcpServersPanel({ accessToken, tenantId }: Props) {
                         </td>
                         <td className="px-6 py-3 text-right">
                           <div className="flex flex-wrap justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={rowLoading}
+                              onClick={() => beginEdit(server)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                              Edit
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"

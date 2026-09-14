@@ -1,71 +1,129 @@
-# Goal — MCP server install & credentials
+# Goal — Tenant skills for Deep Agents
 
 ## Capability
 
-Tenants can register remote MCP servers (URL + optional service credential or Connect/OAuth), verify readiness before trusting them, and manage those installs through org-rep and Org owner/Platform owner APIs — without secrets leaving encrypted storage.
+Tenant team members can create skills as **`.md` files** from the UI.  
+Deep Agents load and run those markdown skills for requests in that tenant.  
+Each tenant has one **`catalog.json`** tree (folders + links to skill `.md` files).  
+The UI tree and Deep Agents both read that same catalog.  
+This feature is **standalone and pluggable** — not tied to the workflow library.  
+No hard lock-in: storage and skill-loading stay behind clear boundaries so backends can change later.
 
-Org-installed, enabled MCP servers for a tenant are available to Deep Agents on that tenant’s team-member requests when relevant. Control-plane readiness probes stay separate from runtime tool use: probing does not execute user work; Deep Agents may call the same registered servers to satisfy a request.
+## Main users
 
-## Who can do what (MCP install + credentials)
+- **Team member** — creates, edits, moves, deletes, and calls skills for their organisation.
+- **Deep Agent** — selects and executes a matching skill when a request needs one.
 
-### Organisation reps
+No separate org-editor role for now. Members own the tenant skill library.
 
-- Add an MCP to the tenant client profile as a named connection — usually display name + remote URL (HTTP/SSE/streamable HTTP), sometimes plus transport.
-- Can select which installed MCP servers are available on their tenant profile (enable/disable or equivalent selection) for Deep Agents to consider.
-- Can list, install, view, update, delete, and readiness-check MCP servers for their own tenant, including optional service credentials or Connect/OAuth tokens that stay encrypted and never returned in full.
-- Can Connect (OAuth) for remotes that require industry-standard authorization so OAuth-only servers are usable under the tenant profile.
+## Storage (per tenant)
 
-### Org owner/Platform owner
+Store each tenant’s skills under that tenant’s **blob/file store** (tenant-scoped keys).  
+Recommended layout (role names, not one vendor path):
 
-## Success when
+- `{tenant}/skills/catalog.json` — the navigable JSON tree  
+- `{tenant}/skills/**/*.md` — skill files (folders mirror the tree)
 
-1. A tenant-scoped install stores connection details and encrypted credentials uniquely by name.
-2. Install/update can optionally probe readiness and return observable readiness (ready, tool inventory, or error) without exposing the secret.
-3. Org-rep and Org owner/Platform owner routes share one install/verify service; control-plane readiness checks remain distinct from Deep Agents runtime invocation of those servers.
-4. A different remote MCP backend plugs in at the boundary (URL/credential/transport/OAuth adapter), not by rewriting core install logic.
-5. **Org Rep done-when:** a rep can manage unauthenticated, Bearer-authenticated, and Connect/OAuth MCP installs for their tenant from the real UI, and a team member’s Deep Agents request in that tenant can use those enabled installs when relevant (tenant-scoped only; requester does not attach MCPs).
-6. **Auth done-when (Bearer still supported):** optional service/API token stored encrypted and sent as `Authorization: Bearer` on verify and runtime use; secret never returned in full — for remotes that accept token/key auth.
-7. **Auth done-when (Connect/OAuth — near-term required):** Connect/OAuth is industry-standard and must be implemented for near-term demand (OAuth-class remotes); success when a rep can Connect with name+URL, complete OAuth 2.1+PKCE against Protected Resource Metadata, store refresh/access tokens encrypted, refresh on use, and Deep Agents call that tenant MCP with Bearer access tokens — without hardcoding one vendor and without rewriting the named-connection install boundary. Org Rep goal is not complete for those customers until Connect works.
+Why: industry-common pattern is tenant-prefixed object/blob storage; this repo already has a tenant-scoped blob store.  
+Keep a thin **skills store** boundary so local disk, S3, or another backend can plug in without rewriting core skill logic.
 
-## Goal implementation
+## Skill files
 
-- Completing this goal needs real Org-rep UI (Platform owner UI can wait), Connect/OAuth as a near-term required auth path beside Bearer/unauthenticated, and tenant MCP availability to Deep Agents — UI alone, Bearer alone, or runtime alone is not enough when OAuth-class remotes are in demand.
-- Sequence: (1) real Org-rep UI for name+URL, (2) Connect/OAuth with encrypted tokens + refresh, (3) tenant-scoped Deep Agents use; keep Bearer for servers that accept service tokens; do not hardcode specific vendors into core — one remote-auth adapter at the boundary.
+- A skill is a **`.md` file** (name, description in front matter or header, then steps/instructions).  
+- Deep Agents treat **markdown skill files** as the standard skill body (same idea as common agent skill packs that ship `SKILL.md` / `.md` procedures).  
+- Folders group skills; they are nodes in `catalog.json`, not separate skill runnables.
 
-### Org-rep UI for MCP install
+## Catalog (`catalog.json`)
 
-- Wire the org-rep tools UI to the real tenant MCP APIs (not mock-only state) so a rep can list, install, view, update, delete, and readiness-check MCP servers for their own tenant.
-- Rep can select which MCP servers are available on the tenant profile (e.g. enable/disable) so only chosen installs are eligible for Deep Agents.
-- Unauthenticated MCP: the UI captures display name + remote URL (and transport when needed), stores no service credential, and can verify readiness with a handshake that sends no Authorization header.
-- Authenticated MCP (Bearer): the UI captures display name + remote URL plus optional service/API token; token is stored encrypted, used as Bearer on verify/use, and never returned in full — profile shows connection identity and `has_service_credential` only.
-- Authenticated MCP (Connect): the UI offers Connect on the named connection so the rep authorizes OAuth-class remotes; profile shows connected status, not raw tokens.
-- Secrets stay out of plain profile text.
-- Product promise: add URL → Connect (when required) → select available on tenant → agents may use when relevant.
+- One JSON tree per tenant: folders, order, and pointers to skill `.md` paths.  
+- Source of truth for the UI tree view.  
+- Members do not hand-edit it for normal create/move/delete.
 
-### Connect/OAuth for authenticated MCP (industry standard — implement near-term)
+## Catalog update rule
 
-- Near-term required (not optional polish) so OAuth-only remotes can be installed and used under a tenant.
-- UI: Connect flow on the named connection (display name + remote URL) that starts OAuth when the remote challenges or when the rep chooses Connect.
-- Discovery: handle `401` + `WWW-Authenticate` / Protected Resource Metadata (RFC 9728) to find the authorization server and required scopes.
-- Client auth: OAuth 2.1 with PKCE; resource indicator for the MCP server URL; client identity via Client ID Metadata Documents (or supported registration path).
-- Token handling: exchange code for access (+ refresh) tokens; store tokens encrypted per tenant connection; never show raw tokens in the profile UI.
-- Runtime: on verify and Deep Agents use, send `Authorization: Bearer <access_token>`; refresh when expired; re-Connect when refresh fails.
-- Tenant scope: tokens and Connect state stay on the org/tenant MCP profile; team members do not run their own Connect for each request.
-- Boundary: plug OAuth at the credential/adapter edge of the same named-connection install model — do not rewrite core tenant install or Deep Agents tenant selection; do not encode one vendor into shared core.
-- Complexity remains real (consent, discovery, refresh, failure UX), but deferring Connect blocks near-term OAuth-class MCP demand — implement it in the Org Rep near-term path; cut Platform-owner UI before cutting Connect if scope must shrink.
+Every create, move, rename, or delete of a skill file or folder goes through **one write path**.  
+That path updates the `.md` (or folder) **and** `catalog.json` together.  
+If the write fails, neither change is kept — so the tree does not drift.
 
-### Org owner/Platform owner UI for MCP install
+## Progressive disclosure (intended)
 
-- Wire the Org owner/Platform owner tools UI to the real admin MCP APIs so they can choose a tenant and list, install, view, update, delete, readiness-check, approve, and decline that tenant’s MCP servers, with optional service credentials never returned in full and mutating actions audited.
-- Lower near-term priority than Org-rep UI + Connect/OAuth + Deep Agents tenant use if scope must be cut.
+This skill structure is meant to use **progressive disclosure**.  
+First the agent sees only the short catalog index (name + description).  
+It loads the full skill `.md` only after a skill is selected.  
+It does not put every skill body into context up front.
 
-### Tenant MCP in Deep Agents execution
+## How the agent picks a skill (industry pattern)
 
-- The API can already install MCP servers with or without service credentials, but install alone is not enough: tenant-registered MCP servers selected as available by the Org Rep must be loadable by Deep Agents at run time.
-- Org Reps (not individual team members) install and select MCPs on the organisation/tenant profile; a team member’s request runs in that tenant’s context — MCP tools are available when relevant, not guaranteed for every request; the requester does not attach MCPs themselves.
-- For each user request, Deep Agents must only see the MCP set the Org Rep made available for that tenant, so one tenant’s servers are never mixed into another tenant’s run.
-- After listing tools from those available tenant MCP servers, Deep Agents should use only the MCP tools necessary to do the work — not invoke every listed tool by default.
-- Runtime must present a valid access credential for the connection type: none, static Bearer service token, or refreshed OAuth access token from Connect.
-- Logging/trace: for each user request, record which MCP server and which tool was used, and where in the run it was used (request/run id, tenant, server name, tool name, step/time) without logging secrets.
-- That runtime availability does not replace the Org-rep UI and Connect/OAuth work above; UI manageability, Connect where required, selection of available MCPs, necessary-tool use, and tenant-scoped runtime use are all required.
-- Observable Org Rep outcome: after a rep installs (and Connects when required) and selects an MCP as available, a team-member request in that tenant can invoke necessary tools from that server when relevant; a request for another tenant cannot; traces show which MCP/tool ran on that request.
+1. **Explicit** — user names the skill → load that `.md` and run it.  
+2. **Described match** — agent sees a short index from the catalog (name + description only).  
+3. **Load on use** — only then read the full `.md` (progressive disclosure).  
+4. If nothing matches well, ask or continue without a skill — do not force a wrong skill.
+
+## User journey
+
+### 1. Create a skill (UI)
+
+**As a team member,** I open the skills page in the org UI.  
+I create a skill as a `.md` file (name, short description, steps).  
+I optionally note which tools it may use and what “done” looks like.  
+I choose a folder in the tree (or the root).  
+On save, the system writes the `.md` **and** updates `catalog.json` in the same step.
+
+### 2. Add a folder
+
+**As a team member,** I add a folder in the skills tree.  
+On save, `catalog.json` gains that folder.  
+New skills can sit under it when created or moved.
+
+### 3. Edit or move a skill
+
+**As a team member,** I open an existing skill `.md` and edit it.  
+If I rename or move it, `catalog.json` updates in the same step.
+
+### 4. Browse the skill tree
+
+**As a team member,** I see folders and skills from `catalog.json`.  
+I open a skill to view or edit its `.md`.  
+I cannot see other tenants’ skills.
+
+### 5. Delete a skill or folder
+
+**As a team member,** I delete a skill `.md` or a folder.  
+Deleting a folder removes or relocates its children per UI choice (confirm first).  
+On confirm, files change **and** `catalog.json` updates in the same step.
+
+### 6. Call a skill
+
+**As a team member,** I ask the Deep Agent by skill name or in plain language.  
+The agent uses the catalog index to pick a skill, then loads that `.md`.  
+It follows the skill and only the tools the run is allowed to use.
+
+### 7. Agent executes the skill
+
+**As the Deep Agent,** I load the selected tenant `.md` skill.  
+I follow its steps against the user’s request.  
+I stop when the skill’s success checks are met (or report failure clearly).
+
+### 8. See what ran
+
+**As a team member,** I can see that a skill ran for my request.  
+The trace shows skill name/path (and version if present) and tools used.  
+Secrets are never shown.
+
+## Pluggable / no lock-in
+
+- Skills feature is its own module: store, catalog, UI, and agent skill-loader.  
+- Agent harness calls a **skill provider** interface — swap storage or matching later without rewriting the centre.  
+- Not coupled to the workflow library in this goal.
+
+## Done when
+
+1. A member can create and save a skill `.md` from the UI for their tenant.  
+2. A member can add folders and see a tree from `catalog.json`.  
+3. Create / move / rename / delete of a skill or folder updates `catalog.json` in the same step.  
+4. A member can edit tenant skill `.md` files.  
+5. A member can invoke a skill by name or natural language via the Deep Agent.  
+6. The agent picks via catalog index, then loads the full `.md` only when selected.  
+7. Skills live in tenant-scoped blob/file storage behind a pluggable boundary.  
+8. Another tenant never sees or runs those skills.  
+9. A run leaves a simple audit trail (skill + tools), not just a chat reply.

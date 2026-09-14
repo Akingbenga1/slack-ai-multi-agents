@@ -9,6 +9,7 @@ import {
   IconExternal,
   IconInvite,
   IconKnowledge,
+  IconSkills,
   IconSlack,
   IconTools,
   IconUsage,
@@ -46,6 +47,12 @@ const ORG_ITEMS: SidebarItem[] = [
     label: "Knowledge",
     icon: <IconKnowledge size={20} />,
     isActive: (p) => p.startsWith("/app/knowledge"),
+  },
+  {
+    href: "/app/skills",
+    label: "Skills",
+    icon: <IconSkills size={20} />,
+    isActive: (p) => p.startsWith("/app/skills"),
   },
   {
     href: "/app/workflows",
